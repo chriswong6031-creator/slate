@@ -107,8 +107,11 @@ function renderHero(item) {
   }
 }
 
-/* ===== CARD GRID with year-shelf dividers ===== */
-function renderGrid(items, isSearch) {
+/* ===== CARD GRID with year-shelf dividers =====
+   offset maps local indices back into D.filteredItems when the caller renders
+   a slice (the hero branch passes items.slice(1) with offset 1 — cards must
+   open filteredItems[local + offset], not the previous article). */
+function renderGrid(items, isSearch, offset = 0) {
   const grid = document.getElementById('lib-card-grid');
   if (!grid) return;
 
@@ -120,7 +123,8 @@ function renderGrid(items, isSearch) {
   // Group by year (date-desc default; any sort — use item's year)
   const byYear = [];
   let curYear = null;
-  items.forEach((item, idx) => {
+  items.forEach((item, localIdx) => {
+    const idx = localIdx + offset;
     const year = new Date(item.date).getFullYear();
     if (year !== curYear) {
       curYear = year;

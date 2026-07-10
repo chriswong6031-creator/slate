@@ -297,7 +297,7 @@ function renderAll() {
     } else {
       if (items.length) {
         V.renderHero(items[0]);
-        V.renderGrid(items.slice(1), false);
+        V.renderGrid(items.slice(1), false, 1);
       } else {
         if (hero) hero.style.display = 'none';
         V.renderGrid([], false);
@@ -427,14 +427,13 @@ async function init() {
     const cc = document.getElementById('lib-count-citrini');
     if (cc) cc.textContent = citriniCount;
 
-    // Check hash for deep-link
-    const routed = await R.handleHashRoute();
-    if (!routed) {
-      renderAll();
-    }
+    // Always render the grid first so closing a deep-linked reader (Esc/back)
+    // returns to a populated library, then let the hash route open on top.
+    renderAll();
+    await R.handleHashRoute();
   } catch (e) {
     document.getElementById('lib-card-grid').innerHTML =
-      '<p style="color:var(--danger);padding:24px">Failed to load library: ' + e.message + '</p>';
+      '<p style="color:var(--danger);padding:24px">Failed to load library: ' + D.escHtml(e.message) + '</p>';
   }
 
   // Hash navigation (back/forward)

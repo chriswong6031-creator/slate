@@ -237,12 +237,26 @@ def run(base_url: str) -> int:
             page.click('#lib-theme-btn')
             page.wait_for_timeout(100)
 
-        # ── Check 15: esc closes reader, returns to grid ─────────────────────
-        # Reopen reader then close with Escape
+        # ── Check 15: clicking a grid card opens THAT article (not a neighbor) ──
+        # The all-items grid renders a slice (hero holds items[0]); a mid-grid
+        # card guards against index-offset regressions between card and reader.
         cards = page.query_selector_all('.lib-card[data-idx]')
-        if cards:
-            cards[0].click()
-            page.wait_for_timeout(1000)
+        if len(cards) >= 3:
+            card = cards[2]
+            card_slug = card.get_attribute('data-slug')
+            card.click()
+            page.wait_for_timeout(1200)
+            reader_open_now = page.evaluate("document.getElementById('lib-reader').classList.contains('open')")
+            opened_title = page.evaluate("(document.getElementById('lib-article-title')||{}).textContent || ''")
+            expected = next((i for i in items if i['id'] == card_slug), None)
+            match = bool(reader_open_now and expected and opened_title.strip() == expected['title'].strip())
+            if not check('grid card click opens the clicked article', match,
+                         f'card={card_slug!r} opened={opened_title.strip()[:50]!r}'): failures += 1
+        else:
+            failures += 1
+            print('  [FAIL] card-click correctness — fewer than 3 grid cards')
+
+        # ── Check 15b: esc closes reader, returns to grid ────────────────────
         reader_open_now = page.evaluate("document.getElementById('lib-reader').classList.contains('open')")
         if reader_open_now:
             page.keyboard.press('Escape')
@@ -262,9 +276,13 @@ def run(base_url: str) -> int:
         reader_via_hash = page.evaluate("document.getElementById('lib-reader').classList.contains('open')")
         if not check(f'hash deep-link (#/read/{deep_slug}) opens reader', reader_via_hash): failures += 1
 
-        # Close reader
+        # ── Check 16b: closing a deep-linked reader lands on a populated grid ──
         page.keyboard.press('Escape')
-        page.wait_for_timeout(200)
+        page.wait_for_timeout(500)
+        cards_after = page.evaluate("document.querySelectorAll('.lib-card[data-idx]').length")
+        hero_visible = page.evaluate("(document.getElementById('lib-hero')||{style:{display:'none'}}).style.display !== 'none'")
+        if not check('esc after deep-link returns populated grid', cards_after > 0 and hero_visible,
+                     f'cards={cards_after} hero={hero_visible}'): failures += 1
 
         # ── Check 17: no-results empty state ─────────────────────────────────
         page.goto(lib_url, wait_until='networkidle')
