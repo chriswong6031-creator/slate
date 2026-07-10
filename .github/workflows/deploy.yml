@@ -1,0 +1,44 @@
+name: deploy
+# Push to main -> rsync the served app to the VPS origin for slate.greydeercapital.com.
+# The SSH key rides as the VPS_DEPLOY_KEY repo secret (same pattern as the macro repo);
+# the Caddy site block is owned by the macro repo (app/deploy/Caddyfile).
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: build check — committed sw.js/Slate.html must match sources
+        run: |
+          python3 build_standalone.py >/dev/null
+          git diff --exit-code -- sw.js Slate.html || {
+            echo "::error::sw.js/Slate.html are stale — run build_standalone.py and commit."; exit 1; }
+
+      - name: rsync to VPS
+        env:
+          SSH_KEY: ${{ secrets.VPS_DEPLOY_KEY }}
+        run: |
+          set -euo pipefail
+          [ -n "$SSH_KEY" ] || { echo "::error::VPS_DEPLOY_KEY secret is empty/absent"; exit 1; }
+          umask 077
+          KEYFILE="$RUNNER_TEMP/vps_key"
+          printf '%s\n' "$SSH_KEY" > "$KEYFILE"
+          chmod 600 "$KEYFILE"
+          trap 'rm -f "$KEYFILE"' EXIT
+          RSH="ssh -i $KEYFILE -o StrictHostKeyChecking=accept-new -o BatchMode=yes"
+          $RSH root@146.190.142.17 'mkdir -p /opt/slate'
+          rsync -az --delete -e "$RSH" \
+            --include 'index.html' --include 'manifest.webmanifest' --include 'sw.js' \
+            --include 'css/***' --include 'js/***' --include 'icons/***' \
+            --exclude '*' \
+            ./ root@146.190.142.17:/opt/slate/
+          echo "deployed to /opt/slate"
