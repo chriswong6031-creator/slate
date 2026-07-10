@@ -1,0 +1,456 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Slate Library</title>
+<meta name="robots" content="noindex">
+<link rel="stylesheet" href="css/base.css">
+<link rel="stylesheet" href="css/library.css">
+</head>
+<body class="lib-page">
+
+<!-- TOPBAR -->
+<div id="lib-topbar">
+  <div class="lib-tb-left">
+    <a class="lib-logo-mark" href="index.html" title="Back to Slate" aria-label="Back to Slate">S</a>
+    <span class="lib-app-title">Library</span>
+    <span class="lib-tb-divider" aria-hidden="true"></span>
+    <a class="lib-tb-btn" href="index.html" aria-label="Back to Slate app">
+      <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M10 3L4 8l6 5"/></svg>
+      Slate
+    </a>
+  </div>
+  <div class="lib-tb-center">
+    <div class="lib-search-wrap" id="lib-search-wrap">
+      <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="7" cy="7" r="4.5"/><path d="M10.5 10.5L14 14"/></svg>
+      <input type="text" id="lib-search-input" placeholder="Search Library…" autocomplete="off" aria-label="Search articles">
+      <button id="lib-ft-toggle" title="Toggle full-text search" aria-pressed="false">Full text</button>
+      <span class="lib-search-kbd" aria-hidden="true">/</span>
+    </div>
+  </div>
+  <div class="lib-tb-right">
+    <button class="lib-tb-btn icon-only" id="lib-theme-btn" title="Toggle theme" aria-label="Toggle light/dark theme">
+      <svg id="lib-theme-sun" width="15" height="15" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="10" cy="10" r="3.5"/><path d="M10 2v1.5M10 16.5V18M2 10h1.5M16.5 10H18M4.22 4.22l1.06 1.06M14.72 14.72l1.06 1.06M4.22 15.78l1.06-1.06M14.72 5.28l1.06-1.06"/></svg>
+      <svg id="lib-theme-moon" width="15" height="15" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" style="display:none"><path d="M17 12.3A7 7 0 0 1 7.7 3a7 7 0 1 0 9.3 9.3z"/></svg>
+    </button>
+  </div>
+</div>
+
+<!-- APP -->
+<div class="lib-app" id="lib-app">
+
+  <!-- SIDEBAR -->
+  <nav id="lib-sidebar" aria-label="Library navigation">
+    <div class="lib-sb-section">
+      <div class="lib-sb-label">Library</div>
+      <button class="lib-sb-item active" data-filter="all" aria-label="All items">
+        <div class="lib-sb-item-left">
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><rect x="1" y="2" width="6" height="8" rx="1.5"/><rect x="9" y="6" width="6" height="8" rx="1.5"/><path d="M4 12v2M12 2v2"/></svg>
+          All Items
+        </div>
+        <span class="lib-sb-count" id="lib-count-all">—</span>
+      </button>
+      <button class="lib-sb-item" data-filter="source:citrini" aria-label="Citrini Research">
+        <div class="lib-sb-item-left">
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="8" cy="8" r="6.5"/><path d="M8 5.5v5M5.5 8h5"/></svg>
+          Citrini Research
+        </div>
+        <span class="lib-sb-count" id="lib-count-citrini">—</span>
+      </button>
+    </div>
+
+    <div class="lib-sb-section">
+      <div class="lib-sb-label">Collections</div>
+      <div class="lib-coll-list" id="lib-sb-colls">
+        <!-- injected by JS -->
+      </div>
+    </div>
+
+    <div class="lib-sb-section">
+      <div class="lib-sb-label">Files</div>
+      <button class="lib-sb-item lib-quiet" data-filter="type:pdf" aria-label="PDFs">
+        <div class="lib-sb-item-left">
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><rect x="2" y="1" width="12" height="14" rx="2"/><path d="M5 5h6M5 8h4"/></svg>
+          PDFs
+        </div>
+        <span class="lib-sb-count" style="opacity:0.45">0</span>
+      </button>
+      <button class="lib-sb-item lib-quiet" data-filter="type:file" aria-label="Files">
+        <div class="lib-sb-item-left">
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M4 1.8h5L12.2 5v9.2H4z"/><path d="M9 1.8V5h3.2"/></svg>
+          Files
+        </div>
+        <span class="lib-sb-count" style="opacity:0.45">0</span>
+      </button>
+      <button class="lib-sb-item lib-quiet" data-filter="type:writeup" aria-label="Write-ups">
+        <div class="lib-sb-item-left">
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M12 2l2 2-9 9H3v-2L12 2z"/><path d="M10 4l2 2"/></svg>
+          Write-ups
+        </div>
+        <span class="lib-sb-count" style="opacity:0.45">0</span>
+      </button>
+      <div class="lib-sb-hint">Added via CLI</div>
+    </div>
+  </nav>
+
+  <!-- MAIN -->
+  <main id="lib-main">
+    <!-- Toolbar -->
+    <div id="lib-toolbar">
+      <div class="lib-toolbar-left">
+        <span class="lib-toolbar-title" id="lib-toolbar-title">All Items</span>
+        <span class="lib-toolbar-count" id="lib-toolbar-count"></span>
+      </div>
+      <div class="lib-toolbar-right">
+        <button class="lib-sort-btn" id="lib-sort-btn" aria-label="Sort">
+          <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M3 4h10M5 8h6M7 12h2"/></svg>
+          Newest first
+        </button>
+        <div class="lib-seg" role="group" aria-label="View mode">
+          <button class="lib-seg-btn active" id="lib-view-grid" aria-label="Grid view" title="Grid view">
+            <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="1" y="1" width="6" height="6" rx="1.5"/><rect x="9" y="1" width="6" height="6" rx="1.5"/><rect x="1" y="9" width="6" height="6" rx="1.5"/><rect x="9" y="9" width="6" height="6" rx="1.5"/></svg>
+          </button>
+          <button class="lib-seg-btn" id="lib-view-list" aria-label="List view" title="List view">
+            <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M1 4h14M1 8h14M1 12h14"/></svg>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- CONTENT -->
+    <div id="lib-content">
+
+      <!-- GRID MODE -->
+      <div id="lib-grid-canvas">
+        <!-- Hero -->
+        <button id="lib-hero" aria-label="Open featured article" style="display:none">
+          <div class="lib-hero-cover" id="lib-hero-cover-wrap">
+            <div class="lib-hero-fallback" id="lib-hero-fallback">
+              <span class="lib-spine-bar"></span>
+              <span class="lib-spine-text"></span>
+            </div>
+            <img id="lib-hero-img" src="" alt="" style="display:none">
+            <span class="lib-hero-badge">Latest</span>
+          </div>
+          <div class="lib-hero-body">
+            <div>
+              <div class="lib-hero-coll" id="lib-hero-coll"></div>
+              <h2 class="lib-hero-title" id="lib-hero-title">Loading…</h2>
+              <p class="lib-hero-subtitle" id="lib-hero-subtitle"></p>
+            </div>
+            <div class="lib-hero-meta">
+              <span class="lib-hero-author" id="lib-hero-author"></span>
+              <span class="lib-meta-sep" aria-hidden="true">·</span>
+              <span class="lib-hero-date" id="lib-hero-date"></span>
+              <span class="lib-meta-sep" aria-hidden="true">·</span>
+              <span class="lib-hero-reading">
+                <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="8" cy="8" r="6.5"/><path d="M8 5v3.5l2 1.5"/></svg>
+                <span id="lib-hero-reading"></span>
+              </span>
+            </div>
+          </div>
+        </button>
+
+        <!-- Year-shelf + grid rendered here -->
+        <div id="lib-card-grid" aria-label="Articles"></div>
+
+        <!-- Empty state -->
+        <div id="lib-empty" role="status" aria-live="polite">
+          <div class="lib-empty-icon">🔍</div>
+          <div class="lib-empty-title">No results found</div>
+          <div class="lib-empty-sub">Try a different search term or browse by collection.</div>
+          <button class="lib-empty-clear" id="lib-empty-clear">Clear search</button>
+        </div>
+
+      </div><!-- /lib-grid-canvas -->
+
+      <!-- LIST MODE (research-desk graft) -->
+      <div id="lib-list-view" role="region" aria-label="Article list">
+        <div class="lib-list-header" aria-hidden="true">
+          <div class="lib-list-hcell"></div>
+          <div class="lib-list-hcell">Title</div>
+          <div class="lib-list-hcell">Collection</div>
+          <div class="lib-list-hcell">Date</div>
+          <div class="lib-list-hcell">Read</div>
+        </div>
+        <div id="lib-list-rows" role="list"></div>
+        <!-- Preview panel -->
+        <aside id="lib-preview" class="lib-empty" aria-label="Article preview">
+          <div class="lib-pv-body">
+            <div class="lib-pv-empty">Select an article to preview</div>
+          </div>
+        </aside>
+      </div>
+
+    </div><!-- /lib-content -->
+  </main>
+
+</div><!-- /lib-app -->
+
+<!-- READER VIEW -->
+<div id="lib-reader" role="dialog" aria-modal="true" aria-label="Article reader">
+  <div id="lib-read-progress" aria-hidden="true"></div>
+
+  <div id="lib-reader-topbar">
+    <div style="display:flex;align-items:center;gap:8px">
+      <button class="lib-back-btn" id="lib-reader-back" aria-label="Back to library">
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M10 3L4 8l6 5"/></svg>
+        Library
+      </button>
+      <span class="lib-tb-divider" aria-hidden="true"></span>
+      <span class="lib-reader-title-bar" id="lib-reader-title-bar" aria-live="polite"></span>
+    </div>
+    <div class="lib-reader-pager">
+      <button class="lib-page-btn" id="lib-prev-btn" disabled aria-label="Previous article">
+        <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M10 3L4 8l6 5"/></svg>
+        Previous
+      </button>
+      <button class="lib-page-btn" id="lib-next-btn" aria-label="Next article">
+        Next
+        <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M6 3l6 5-6 5"/></svg>
+      </button>
+    </div>
+  </div>
+
+  <div id="lib-reader-layout">
+    <!-- TOC rail -->
+    <aside id="lib-toc" aria-label="Table of contents">
+      <div class="lib-toc-label">Contents</div>
+      <div id="lib-toc-items"></div>
+    </aside>
+
+    <!-- Article scroll -->
+    <div id="lib-reader-scroll">
+      <article id="lib-article">
+
+        <div class="lib-locked-banner" id="lib-locked-banner">
+          <span class="lib-locked-icon" aria-hidden="true">🔒</span>
+          <div>
+            <div class="lib-locked-title">Subscriber-only content</div>
+            <div class="lib-locked-desc">
+              This article requires a paid Citrini subscription.
+              <a class="lib-locked-link" href="#" target="_blank" rel="noopener">View on Citrini Research</a>
+            </div>
+          </div>
+        </div>
+
+        <header class="lib-article-header">
+          <div class="lib-article-coll-pill" id="lib-article-coll"></div>
+          <h1 class="lib-article-h1" id="lib-article-title"></h1>
+          <p class="lib-article-subtitle" id="lib-article-subtitle"></p>
+          <div class="lib-article-byline">
+            <span class="lib-byline-author" id="lib-article-author"></span>
+            <span class="lib-byline-sep" aria-hidden="true">·</span>
+            <span id="lib-article-date"></span>
+            <span class="lib-byline-sep" aria-hidden="true">·</span>
+            <span>
+              <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="8" cy="8" r="6.5"/><path d="M8 5v3.5l2 1.5"/></svg>
+              <span id="lib-article-reading"></span>
+            </span>
+          </div>
+          <img class="lib-cover-img lib-cover-img-hidden" id="lib-article-cover-img" alt="Article cover">
+        </header>
+
+        <div class="lib-article-body" id="lib-article-body"></div>
+
+      </article>
+    </div>
+  </div>
+</div>
+
+<!-- Toast -->
+<div id="lib-toast" role="alert" aria-live="polite"></div>
+
+<script src="js/library-data.js"></script>
+<script src="js/library-views.js"></script>
+<script src="js/library-reader.js"></script>
+<script>
+/* ===== APP ORCHESTRATOR ===== */
+'use strict';
+
+window.LibApp = (() => {
+const D = window.LibData;
+const V = window.LibViews;
+const R = window.LibReader;
+
+let sortCycleIdx = 0;
+let ftSnippets = new Map();
+
+/* ===== RENDER LOOP ===== */
+function renderAll() {
+  const isSearch = !!D.state.search;
+  const items = D.getFiltered(ftSnippets);
+  V.setSnippets(ftSnippets);
+
+  V.updateToolbar(items, D.state.filterLabel);
+  V.syncSidebarActive(D.state.filter);
+
+  if (D.state.view === 'grid') {
+    const hero = document.getElementById('lib-hero');
+    if (isSearch) {
+      if (hero) hero.style.display = 'none';
+      V.renderGrid(items, true);
+    } else if (D.state.filter !== 'all' && !D.state.filter.startsWith('source:')) {
+      if (hero) hero.style.display = 'none';
+      V.renderGrid(items, false);
+    } else {
+      if (items.length) {
+        V.renderHero(items[0]);
+        V.renderGrid(items.slice(1), false, 1);
+      } else {
+        if (hero) hero.style.display = 'none';
+        V.renderGrid([], false);
+      }
+    }
+  } else {
+    V.renderList(items);
+    // Reset preview when filter changes
+    V.renderPreview(null);
+  }
+
+  V.showEmpty(!items.length);
+}
+
+/* ===== FILTER ===== */
+function applyFilter(filter, label) {
+  D.state.filter = filter;
+  D.state.filterLabel = label || 'All Items';
+  D.state.search = '';
+  const si = document.getElementById('lib-search-input');
+  if (si) si.value = '';
+  renderAll();
+}
+
+/* ===== SEARCH ===== */
+function handleSearch(q) {
+  D.state.search = q.trim();
+  ftSnippets = new Map();
+
+  if (D.state.ftMode && D.state.search) {
+    // Full-text: ensure index loaded, then render
+    D.ensureFulltext().then(() => {
+      renderAll();
+    }).catch(err => {
+      V.showToast('Full-text index not available', 2000);
+      renderAll();
+    });
+  } else {
+    renderAll();
+  }
+}
+
+/* ===== INIT ===== */
+async function init() {
+  D.initTheme();
+  R.initKeyboard();
+  R.initNavButtons();
+
+  // Theme toggle
+  document.getElementById('lib-theme-btn').addEventListener('click', D.toggleTheme);
+
+  // Sidebar static items
+  document.querySelectorAll('.lib-sb-item[data-filter]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const f = btn.getAttribute('data-filter');
+      const label = btn.querySelector('.lib-sb-item-left')?.textContent?.trim() || 'All Items';
+      applyFilter(f, label);
+    });
+  });
+
+  // Sort
+  document.getElementById('lib-sort-btn').addEventListener('click', () => {
+    sortCycleIdx = (sortCycleIdx + 1) % V.SORT_CYCLE.length;
+    D.state.sort = V.SORT_CYCLE[sortCycleIdx].key;
+    V.updateSortBtn(D.state.sort);
+    renderAll();
+  });
+
+  // View toggle
+  document.getElementById('lib-view-grid').addEventListener('click', () => {
+    D.state.sort = D.state.sort; // no change
+    D.state.view = 'grid';
+    V.setViewMode('grid');
+    localStorage.setItem('slate-lib-view', 'grid');
+    renderAll();
+  });
+  document.getElementById('lib-view-list').addEventListener('click', () => {
+    D.state.view = 'list';
+    V.setViewMode('list');
+    localStorage.setItem('slate-lib-view', 'list');
+    renderAll();
+  });
+  // Restore persisted view
+  const savedView = localStorage.getItem('slate-lib-view');
+  if (savedView === 'list') {
+    D.state.view = 'list';
+    V.setViewMode('list');
+  }
+
+  // Search
+  const si = document.getElementById('lib-search-input');
+  si.addEventListener('input', e => handleSearch(e.target.value));
+
+  // Full-text toggle
+  const ftBtn = document.getElementById('lib-ft-toggle');
+  ftBtn.addEventListener('click', () => {
+    D.state.ftMode = !D.state.ftMode;
+    ftBtn.classList.toggle('active', D.state.ftMode);
+    ftBtn.setAttribute('aria-pressed', String(D.state.ftMode));
+    if (D.state.search) handleSearch(D.state.search);
+  });
+
+  // Empty-state clear
+  document.getElementById('lib-empty-clear').addEventListener('click', () => {
+    if (si) si.value = '';
+    applyFilter('all', 'All Items');
+  });
+
+  // Hero click
+  document.getElementById('lib-hero').addEventListener('click', () => {
+    if (D.filteredItems.length) R.open(0);
+  });
+  document.getElementById('lib-hero').addEventListener('keydown', e => {
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); if (D.filteredItems.length) R.open(0); }
+  });
+
+  // Sidebar add hint
+  const addBtn = document.getElementById('lib-sb-add-btn');
+  if (addBtn) addBtn.addEventListener('click', () => V.showToast('Ingest is CLI-side — use slate-lib add <url>', 3000));
+
+  // Load manifest
+  try {
+    await D.loadManifest();
+    V.buildSidebar();
+    // Update citrini source count
+    const citriniCount = D.allItems.filter(i => i.source === 'citrini').length;
+    const cc = document.getElementById('lib-count-citrini');
+    if (cc) cc.textContent = citriniCount;
+
+    // Always render the grid first so closing a deep-linked reader (Esc/back)
+    // returns to a populated library, then let the hash route open on top.
+    renderAll();
+    await R.handleHashRoute();
+  } catch (e) {
+    document.getElementById('lib-card-grid').innerHTML =
+      '<p style="color:var(--danger);padding:24px">Failed to load library: ' + D.escHtml(e.message) + '</p>';
+  }
+
+  // Hash navigation (back/forward)
+  window.addEventListener('popstate', async () => {
+    const route = D.parseHash();
+    if (route.type === 'read') {
+      await R.handleHashRoute();
+    } else {
+      R.close();
+    }
+  });
+}
+
+init();
+
+return { applyFilter };
+})();
+</script>
+</body>
+</html>

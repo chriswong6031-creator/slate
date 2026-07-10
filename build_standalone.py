@@ -60,6 +60,8 @@ def build_single_file() -> None:
     html = re.sub(r'<link rel="manifest"[^>]*>\n?', "", html)
     html = re.sub(r'<link rel="apple-touch-icon"[^>]*>\n?', "", html)
     html = re.sub(r'<script id="sw-register">.*?</script>\n?', "", html, flags=re.DOTALL)
+    # Library link points to a separate page — not present in standalone bundle
+    html = re.sub(r'<a[^>]*id="libraryBtn"[^>]*>.*?</a>\n?', "", html, flags=re.DOTALL)
 
     html = re.sub(r'<link rel="stylesheet" href="([^"]+)">', inline_css, html)
     html = re.sub(r'<script src="([^"]+)"></script>', inline_js, html)

@@ -38,6 +38,7 @@ jobs:
           $RSH root@146.190.142.17 'mkdir -p /opt/slate'
           rsync -az --delete -e "$RSH" \
             --include 'index.html' --include 'manifest.webmanifest' --include 'sw.js' \
+            --include 'library.html' \
             --include 'css/***' --include 'js/***' --include 'icons/***' \
             --exclude '*' \
             ./ root@146.190.142.17:/opt/slate/

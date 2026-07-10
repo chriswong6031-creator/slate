@@ -22,6 +22,7 @@ echo "[2/3] rsync app -> $VPS:$WEBROOT"
 ssh -i "$KEY" -o BatchMode=yes "$VPS" "mkdir -p $WEBROOT"
 rsync -az --delete -e "$RSH" \
   --include 'index.html' --include 'manifest.webmanifest' --include 'sw.js' \
+  --include 'library.html' \
   --include 'css/***' --include 'js/***' --include 'icons/***' \
   --exclude '*' \
   "$HERE/" "$VPS:$WEBROOT/"
