@@ -36,6 +36,9 @@ import urllib.request
 SHOT_DIR = os.path.expanduser('~/SlateLibrary/build_shots')
 os.makedirs(SHOT_DIR, exist_ok=True)
 
+# Cloudflare fronts the live host and 403s Python-urllib's default UA.
+UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) slate-verify/1.0'
+
 try:
     from playwright.sync_api import sync_playwright, TimeoutError as PWTimeout
 except ImportError:
@@ -61,9 +64,12 @@ def run(base_url: str) -> int:
         lib_url = base_url.rstrip('/') + '/library.html'
 
         # ── Check 1: manifest.json HTTP 200 ──────────────────────────────────
+        # Cloudflare fronts the live host and 403s the default Python-urllib
+        # user agent — send a browser-like UA for all Python-side fetches.
         mf_url = base_url.rstrip('/') + '/library/manifest.json'
         try:
-            with urllib.request.urlopen(mf_url, timeout=10) as r:
+            req = urllib.request.Request(mf_url, headers={'User-Agent': UA})
+            with urllib.request.urlopen(req, timeout=10) as r:
                 mf_data = json.load(r)
             ok = r.status == 200
         except Exception as e:
@@ -74,9 +80,14 @@ def run(base_url: str) -> int:
         # ── Check 2: 132 items ───────────────────────────────────────────────
         items = mf_data.get('items', [])
         if not check('manifest has 132 items', len(items) == 132, f'got {len(items)}'): failures += 1
+        if not items:
+            print('  [ABORT] manifest empty — remaining data-dependent checks cannot run')
+            browser.close()
+            return failures + 1
 
         # ── Load page ────────────────────────────────────────────────────────
-        page.goto(lib_url, wait_until='networkidle')
+        page.goto(lib_url, wait_until='domcontentloaded')
+        page.wait_for_selector('.lib-card[data-idx]', timeout=25000)
 
         # ── Check 3: sidebar counts sum ≥ 132 ───────────────────────────────
         counts = [int(el.text_content().strip()) for el in page.query_selector_all('.lib-coll-count') if el.text_content().strip().isdigit()]
@@ -172,13 +183,15 @@ def run(base_url: str) -> int:
         if target_item:
             target_slug = target_item['id']
             # Navigate to reader via hash
-            page.goto(lib_url + '#/read/' + target_slug, wait_until='networkidle')
+            page.goto(lib_url + '#/read/' + target_slug, wait_until='domcontentloaded')
+            page.wait_for_selector('#lib-reader.open', timeout=25000)
             page.wait_for_timeout(1500)
             reader_open = page.evaluate("document.getElementById('lib-reader').classList.contains('open')")
             if not check(f'reader opens for {target_slug}', reader_open): failures += 1
         else:
             # Open first non-locked card directly
-            page.goto(lib_url, wait_until='networkidle')
+            page.goto(lib_url, wait_until='domcontentloaded')
+            page.wait_for_selector('.lib-card[data-idx]', timeout=25000)
             page.wait_for_timeout(500)
             first_card = page.query_selector('.lib-card[data-idx="0"]') or page.query_selector('.lib-card[data-idx]')
             if first_card:
@@ -205,7 +218,8 @@ def run(base_url: str) -> int:
         if body_imgs:
             first_img_src = body_imgs[0].evaluate('el => el.src')
             try:
-                with urllib.request.urlopen(first_img_src, timeout=8) as r:
+                req = urllib.request.Request(first_img_src, headers={'User-Agent': UA})
+                with urllib.request.urlopen(req, timeout=8) as r:
                     img_ok = r.status == 200
             except Exception:
                 img_ok = False
@@ -271,7 +285,9 @@ def run(base_url: str) -> int:
         # Use first non-locked item
         deep_item = next((i for i in items if not i.get('locked')), items[0])
         deep_slug = deep_item['id']
-        page.goto(lib_url + '#/read/' + deep_slug, wait_until='networkidle')
+        page.goto(lib_url + '#/read/' + deep_slug, wait_until='domcontentloaded')
+        try: page.wait_for_selector('#lib-reader.open', timeout=25000)
+        except Exception: pass
         page.wait_for_timeout(1500)
         reader_via_hash = page.evaluate("document.getElementById('lib-reader').classList.contains('open')")
         if not check(f'hash deep-link (#/read/{deep_slug}) opens reader', reader_via_hash): failures += 1
@@ -285,7 +301,8 @@ def run(base_url: str) -> int:
                      f'cards={cards_after} hero={hero_visible}'): failures += 1
 
         # ── Check 17: no-results empty state ─────────────────────────────────
-        page.goto(lib_url, wait_until='networkidle')
+        page.goto(lib_url, wait_until='domcontentloaded')
+        page.wait_for_selector('.lib-card[data-idx]', timeout=25000)
         page.wait_for_timeout(400)
         page.fill('#lib-search-input', 'XYZZY_NO_MATCH_9999')
         page.wait_for_timeout(400)
