@@ -4,6 +4,10 @@ A single-user, local-first, responsive web app: Trello-style task boards plus a
 "Brain" for writing down learned truths. No accounts, no network, no teams:
 everything lives in your browser (state in localStorage, attachments in IndexedDB).
 
+**Live:** https://slate.greydeercapital.com (pushes to `main` auto-deploy — see
+[deploy/README.md](deploy/README.md)). This repo is the canonical home; the copy in
+the macro repo's `tools/taskboard/` is the frozen originating snapshot.
+
 ## Use it
 
 Two ways, same app:
