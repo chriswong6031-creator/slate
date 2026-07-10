@@ -54,7 +54,10 @@ async function open(idx) {
   try {
     const art = await D.loadArticle(item.id);
     if (bodyEl) {
-      const html = art.body_html || '<p>No content available.</p>';
+      // Rewrite relative asset paths: "assets/<slug>/..." → "library/assets/<slug>/..."
+      // Article body_html uses paths relative to library/ but page is at root.
+      let html = art.body_html || '<p>No content available.</p>';
+      html = html.replace(/src="assets\//g, 'src="library/assets/');
       // Open external links in new tab
       bodyEl.innerHTML = html;
       bodyEl.querySelectorAll('a[href]').forEach(a => {
