@@ -66,8 +66,19 @@ COLLECTIONS = [
     {"id": "in-conversation",     "name": "In Conversation",          "order": 8},
     {"id": "trade-updates",       "name": "Trade Updates",            "order": 9},
     {"id": "citrindex",           "name": "The Citrindex",            "order": 10},
-    {"id": "notes-misc",          "name": "Notes & Misc",             "order": 11},
+    {"id": "stock-theses",        "name": "Stock Theses",             "order": 11},
+    {"id": "thematic-updates",    "name": "Thematic Updates",         "order": 12},
+    {"id": "annual-trades",       "name": "Trades for the Year",      "order": 13},
+    {"id": "education",           "name": "Education & Frameworks",   "order": 14},
+    {"id": "notes-misc",          "name": "Research Notes",           "order": 15},
 ]
+
+# Unambiguous members of the carved-out families that title rules can't catch.
+EDUCATION_SLUGS = {
+    "the-art-of-being-wrong",
+    "riskreward-and-scenario-analysis",
+    "being-aware-of-opposing-views",
+}
 
 # ── Image download settings ───────────────────────────────────────────────────
 IMAGE_WORKERS   = 12
@@ -580,21 +591,19 @@ def count_words(text: str) -> int:
 
 def assign_collection(slug: str, title: str, hub_membership: dict[str, str]) -> str:
     """
-    Priority:
-    1. Hub membership (hub post parsed the slug)
-    2. Hub post itself → "hubs"
-    3. Title-prefix rules
-    4. notes-misc fallback
+    Priority (series naming is the publication's own, so an unambiguous series
+    title beats hub-digest membership — hub digests over-claim, e.g. the
+    market-memos hub embeds "Small Themes: June 2026"):
+    1. Hub post itself → "hubs"
+    2. Strong series-title rules + explicit family slugs
+    3. Hub membership (catches non-prefixed items a hub curates)
+    4. Weak heuristics, then notes-misc fallback
     """
-    # 1. Hub ground truth
-    if slug in hub_membership:
-        return hub_membership[slug]
-
-    # 2. Is it a hub post itself?
+    # 1. Is it a hub post itself?
     if slug in HUB_SLUGS:
         return "hubs"
 
-    # 3. Title-prefix rules (case-insensitive)
+    # 2. Strong series-title rules (case-insensitive)
     t = title.lower().strip()
 
     if t.startswith("thematic primer"):
@@ -611,11 +620,24 @@ def assign_collection(slug: str, title: str, hub_membership: dict[str, str]) -> 
         return "flash-notes"
     if t.startswith("in conversation"):
         return "in-conversation"
-    if "trade update" in t or "portfolio" in t:
-        return "trade-updates"
     if t.startswith("the citrindex") or "citrindex" in slug:
         return "citrindex"
-    # AMA / everything else
+    if re.match(r"^\d{2} trades for \d{4}", t):
+        return "annual-trades"
+    if t.startswith(("long thesis", "short memo", "single stock", "trade retrospective")):
+        return "stock-theses"
+    if t.startswith("global macro trading for idiots") or slug in EDUCATION_SLUGS:
+        return "education"
+    if t.startswith(("thematic update", "thematic memo")) or "glp-1" in t or t == "robotics update":
+        return "thematic-updates"
+
+    # 3. Hub ground truth
+    if slug in hub_membership:
+        return hub_membership[slug]
+
+    # 4. Weak heuristics, then fallback
+    if "trade update" in t or "portfolio" in t:
+        return "trade-updates"
     return "notes-misc"
 
 
