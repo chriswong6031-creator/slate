@@ -110,6 +110,18 @@ if ('serviceWorker' in navigator && location.protocol !== 'file:') {
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('sw.js').catch((e) => console.warn('Slate: SW registration failed', e));
   });
+  // C6: update toast on controllerchange (new SW took over via skipWaiting+claim).
+  // No auto-reload — reloading mid-edit would destroy unsaved card/note content.
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (window._swUpdateShown) return;
+    window._swUpdateShown = true;
+    if (typeof toast === 'function') {
+      toast('Slate updated — ', {
+        ms: 0,
+        action: { label: 'Reload', fn: () => location.reload() },
+      });
+    }
+  });
 }
 </script>
 <script id="error-handlers">

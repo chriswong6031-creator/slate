@@ -1,0 +1,84 @@
+name: ci
+# Run both Playwright suites on every PR (and on manual dispatch).
+# The real 1 GB Citrini library store is not in git — the library suite runs
+# against a synthetic fixture library (tests/fixtures/library/) via FIXTURE_MODE.
+# The main suite (verify_playwright.py) does not depend on library data.
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # ── Python + Playwright ──────────────────────────────────────────────────
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Playwright + Chromium
+        run: |
+          pip install playwright
+          playwright install --with-deps chromium
+
+      # ── Build check: sw.js/Slate.html must match sources ────────────────────
+      - name: build check — committed sw.js/Slate.html match sources
+        run: |
+          python3 build_standalone.py >/dev/null
+          git diff --exit-code -- sw.js Slate.html || {
+            echo "::error::sw.js/Slate.html are stale — run build_standalone.py and commit."; exit 1; }
+
+      # ── Fixture library: symlink tests/fixtures/library → library/ ──────────
+      # The real store is gitignored; in CI we serve the fixture data instead.
+      - name: Set up fixture library
+        run: |
+          # Remove any stale symlink or directory, then link fixture data.
+          # The fixture lives at tests/fixtures/lib-fixture/ (the name "library"
+          # is gitignored because it hosts the real 1 GB Citrini store).
+          rm -rf library
+          ln -s tests/fixtures/lib-fixture library
+          echo "library/ -> tests/fixtures/lib-fixture/"
+          ls library/
+
+      # ── Start static server ──────────────────────────────────────────────────
+      - name: Start HTTP server on port 8000
+        run: python3 -m http.server 8000 &
+
+      - name: Wait for server to be ready
+        run: |
+          for i in $(seq 1 15); do
+            if curl -sf http://localhost:8000/index.html >/dev/null 2>&1; then
+              echo "Server ready after ${i}s"
+              break
+            fi
+            sleep 1
+          done
+          curl -sf http://localhost:8000/index.html >/dev/null || { echo "::error::HTTP server did not start"; exit 1; }
+          curl -sf http://localhost:8000/library/manifest.json >/dev/null || { echo "::error::fixture manifest not served"; exit 1; }
+          echo "Health check passed"
+
+      # ── Suite 1: main app (verify_playwright.py) ────────────────────────────
+      # This suite tests Boards/Brain/PWA — no library data dependency.
+      - name: Run main suite (verify_playwright.py)
+        run: python3 verify_playwright.py http://localhost:8000
+
+      # ── Suite 2: library (verify_library.py) in fixture mode ────────────────
+      # FIXTURE_MODE=1 parameterises expected counts from the manifest so
+      # hardcoded 132-item assertions become manifest-derived consistency checks.
+      - name: Run library suite (verify_library.py — fixture mode)
+        env:
+          FIXTURE_MODE: '1'
+        run: python3 library_tools/verify_library.py --base-url http://localhost:8000 --fixture
+
+      # ── Kill background server ───────────────────────────────────────────────
+      - name: Kill HTTP server
+        if: always()
+        run: pkill -f 'http.server 8000' || true

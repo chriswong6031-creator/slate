@@ -1,0 +1,21 @@
+{
+  "meta": {
+    "id": "fixture-semis-memo",
+    "type": "article",
+    "source": "citrini",
+    "collection": "semis-memos",
+    "title": "Semis Memo: Fixture Supply Chain Test",
+    "subtitle": "Synthetic semis article for search and reader testing",
+    "date": "2026-06-15T12:00:00.000Z",
+    "authors": ["Citrini"],
+    "tags": [],
+    "words": 1200,
+    "reading_min": 5,
+    "cover": null,
+    "audience": "all",
+    "locked": false,
+    "original_url": "https://example.com/fixture-semis-memo",
+    "path": "articles/fixture-semis-memo.json"
+  },
+  "body_html": "<h2>Supply Chain Overview</h2><p>This fixture semis article tests the spine-tile rendering path (null cover image) and the collection filter. Semiconductor supply chains in this synthetic universe are fully functional and require no actual analysis.</p><h2>Key Components</h2><p>The fixture supply chain consists of imaginary fabs, synthetic wafers, and test-grade chiplets. Each component has been carefully not-sourced from any real supplier, ensuring zero geopolitical risk in this CI environment.</p><h2>Power Semiconductors</h2><p>Power analog semis in the fixture universe trade at exactly fair value. No valuation work is required. The fixture IGBT market is healthy and growing at a test-appropriate CAGR.</p><h2>Memory Markets</h2><p>DRAM and NAND fixture prices are stable. HBM fixture demand is strong but supply is adequate. No supply chain concerns exist in this synthetic test scenario.</p><h2>Conclusion</h2><p>The fixture semis memo successfully validates: spine tile rendering for null-cover items, search filtering by keyword, reader opening, TOC generation, and Escape to close. This is all that is required of a CI fixture article.</p>"
+}

@@ -1,0 +1,21 @@
+{
+  "meta": {
+    "id": "fixture-macro-memo",
+    "type": "article",
+    "source": "citrini",
+    "collection": "macro-memos",
+    "title": "Fixture Macro Memo: Test Article",
+    "subtitle": "A synthetic article for CI fixture testing",
+    "date": "2026-07-01T12:00:00.000Z",
+    "authors": ["Citrini"],
+    "tags": [],
+    "words": 800,
+    "reading_min": 4,
+    "cover": "assets/fixture-macro-memo/cover.png",
+    "audience": "all",
+    "locked": false,
+    "original_url": "https://example.com/fixture-macro-memo",
+    "path": "articles/fixture-macro-memo.json"
+  },
+  "body_html": "<h2>Introduction</h2><p>This is a synthetic fixture article used for CI testing of the Slate Library. It contains enough content to exercise the reader, TOC generation, and search features.</p><h2>Section One: Market Context</h2><p>The macro environment in this synthetic test universe shows moderate growth across all fixture sectors. Interest rates remain stable at test levels, and inflation is precisely 2.00% in this controlled environment.</p><p>Key observations from our fixture data: equities have performed exactly as expected in the test scenario, with the S&P 500 fixture index up 10% year-to-date.</p><h2>Section Two: Semis Exposure</h2><p>Semiconductor exposure in the fixture portfolio is calibrated for testing search functionality. The word \"semis\" appears deliberately here to validate search narrowing behavior.</p><h2>Section Three: Trade Ideas</h2><p>The fixture trade ideas include going long on synthetic assets and short on nothing in particular. This is purely a test construct with no investment advice implied.</p><h2>Conclusion</h2><p>This fixture article successfully demonstrates that the reader, TOC rail, and article body rendering work correctly in CI. If you are reading this in a browser, the library reader is functioning as expected.</p>"
+}
