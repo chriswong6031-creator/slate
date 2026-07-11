@@ -518,6 +518,44 @@ init();
 return { applyFilter, renderAll };
 })();
 </script>
+<script id="sw-register">
+/* C4: Register the shared service worker so library shell is cached offline.
+   C6: Listen for controllerchange (new SW took over via skipWaiting+claim) and
+       show a non-blocking "Slate updated — Reload" toast.  No auto-reload:
+       reloading mid-edit would lose unsaved compose state. */
+if ('serviceWorker' in navigator && location.protocol !== 'file:') {
+  // C6: capture whether a SW was already controlling the page at load time.
+  // skipWaiting()+clients.claim() fires controllerchange on the FIRST install too;
+  // we only want the toast when an EXISTING SW was REPLACED (i.e. a real update).
+  const hadControllerAtLoad = !!navigator.serviceWorker.controller;
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('sw.js').catch((e) =>
+      console.warn('Slate Library: SW registration failed', e));
+  });
+  // C6: update toast on controllerchange (new SW took over via skipWaiting+claim).
+  // No auto-reload — reloading mid-compose would destroy unsaved write-up text.
+  // showLibToast() takes only (msg, ms) so we build the Reload button inline.
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (!hadControllerAtLoad) return; // first-ever install — not an update
+    if (window._swUpdateShown) return;
+    window._swUpdateShown = true;
+    const t = document.getElementById('lib-toast');
+    if (!t) return;
+    t.innerHTML = '';
+    const msg = document.createElement('span');
+    msg.className = 'lib-toast-msg';
+    msg.textContent = 'Slate updated — ';
+    const btn = document.createElement('button');
+    btn.className = 'lib-toast-undo';
+    btn.textContent = 'Reload';
+    btn.addEventListener('click', () => location.reload());
+    t.appendChild(msg);
+    t.appendChild(btn);
+    t.classList.add('show');
+    // No auto-dismiss — user must choose to reload
+  });
+}
+</script>
 <script id="error-handlers">
 /* C8: Global error handlers — surface async failures as a quiet rate-limited toast */
 (function() {

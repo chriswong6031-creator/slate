@@ -611,6 +611,43 @@ with sync_playwright() as pw:
         tc = page.evaluate("document.querySelector('meta[name=\"theme-color\"]').content")
         check("pwa: theme-color meta synced", tc in ("#F5F6F8", "#0F1216"), str(tc))
 
+    # --- C6 NEGATIVE: first-ever install must NOT show "Slate updated" toast ---
+    # A fresh browser context has no prior SW controller (hadControllerAtLoad=false).
+    # Even if the SW installs and claims the client, the update toast must stay hidden.
+    if BASE.startswith("http") and not BASE.endswith(".html"):
+        ctx_c6neg = browser.new_context(viewport={"width": 1440, "height": 900})
+        p_c6neg = ctx_c6neg.new_page()
+        p_c6neg.goto(BASE)
+        # Wait long enough for SW install+activate+claim cycle to complete
+        p_c6neg.wait_for_timeout(1200)
+        # Dispatch a synthetic controllerchange as if a new SW just took over —
+        # the guard must suppress the toast because hadControllerAtLoad was false.
+        p_c6neg.evaluate(
+            "() => { if (navigator.serviceWorker) {"
+            "  navigator.serviceWorker.dispatchEvent(new Event('controllerchange')); } }")
+        p_c6neg.wait_for_timeout(400)
+        update_toast_on_fresh_load = p_c6neg.locator(".toast", has_text="Slate updated").count()
+        check("c6-negative: first-time visitor does NOT see update toast (index.html)",
+              update_toast_on_fresh_load == 0, str(update_toast_on_fresh_load))
+        ctx_c6neg.close()
+
+        # Same check on library.html
+        lib_url_c6neg = BASE.rstrip("/") + "/library.html"
+        ctx_c6neg2 = browser.new_context(viewport={"width": 1440, "height": 900})
+        p_c6neg2 = ctx_c6neg2.new_page()
+        p_c6neg2.goto(lib_url_c6neg, wait_until="domcontentloaded")
+        p_c6neg2.wait_for_timeout(1200)
+        p_c6neg2.evaluate(
+            "() => { if (navigator.serviceWorker) {"
+            "  navigator.serviceWorker.dispatchEvent(new Event('controllerchange')); } }")
+        p_c6neg2.wait_for_timeout(400)
+        lib_toast_el = p_c6neg2.evaluate(
+            "() => { const t = document.getElementById('lib-toast');"
+            "  return t ? t.classList.contains('show') : false; }")
+        check("c6-negative: first-time visitor does NOT see update toast (library.html)",
+              not lib_toast_el, str(lib_toast_el))
+        ctx_c6neg2.close()
+
     # --- RESPONSIVE SMOKE (phone viewport, fresh context) ---
     ctx3 = browser.new_context(viewport={"width": 390, "height": 844},
                                has_touch=True, is_mobile=True)

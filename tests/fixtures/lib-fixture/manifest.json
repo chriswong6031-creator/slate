@@ -1,0 +1,65 @@
+{
+  "version": 1,
+  "generated_at": "2026-07-10T00:00:00.000Z",
+  "sources": ["citrini"],
+  "collections": [
+    { "id": "macro-memos", "label": "Macro Memos", "order": 1 },
+    { "id": "semis-memos", "label": "Semis Memos", "order": 2 }
+  ],
+  "items": [
+    {
+      "id": "fixture-macro-memo",
+      "type": "article",
+      "source": "citrini",
+      "collection": "macro-memos",
+      "title": "Fixture Macro Memo: Test Article",
+      "subtitle": "A synthetic article for CI fixture testing",
+      "date": "2026-07-01T12:00:00.000Z",
+      "authors": ["Citrini"],
+      "tags": [],
+      "words": 800,
+      "reading_min": 4,
+      "cover": "assets/fixture-macro-memo/cover.png",
+      "audience": "all",
+      "locked": false,
+      "original_url": "https://example.com/fixture-macro-memo",
+      "path": "articles/fixture-macro-memo.json"
+    },
+    {
+      "id": "fixture-semis-memo",
+      "type": "article",
+      "source": "citrini",
+      "collection": "semis-memos",
+      "title": "Semis Memo: Fixture Supply Chain Test",
+      "subtitle": "Synthetic semis article for search and reader testing",
+      "date": "2026-06-15T12:00:00.000Z",
+      "authors": ["Citrini"],
+      "tags": [],
+      "words": 1200,
+      "reading_min": 5,
+      "cover": null,
+      "audience": "all",
+      "locked": false,
+      "original_url": "https://example.com/fixture-semis-memo",
+      "path": "articles/fixture-semis-memo.json"
+    },
+    {
+      "id": "fixture-locked-article",
+      "type": "article",
+      "source": "citrini",
+      "collection": "macro-memos",
+      "title": "Fixture Locked: Subscriber Only",
+      "subtitle": "This article is locked for non-subscribers",
+      "date": "2026-05-01T12:00:00.000Z",
+      "authors": ["Citrini"],
+      "tags": [],
+      "words": 2000,
+      "reading_min": 8,
+      "cover": null,
+      "audience": "subscriber",
+      "locked": true,
+      "original_url": "https://example.com/fixture-locked",
+      "path": "articles/fixture-locked-article.json"
+    }
+  ]
+}

@@ -3270,7 +3270,9 @@ function toast(msg, opts) {
   root.appendChild(t);
   requestAnimationFrame(() => t.classList.add('show'));
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(dismissToast, opts.ms || (opts.action ? 6000 : 3200));
+  if (opts.ms !== 0 && !opts.persist) {
+    toastTimer = setTimeout(dismissToast, opts.ms || (opts.action ? 6000 : 3200));
+  }
 }
 function dismissToast() {
   const t = $('#toastRoot .toast');

@@ -3,7 +3,7 @@
    any source change produces a new cache and an immediate takeover. */
 'use strict';
 
-const VERSION = 'slate-5bed0017d1';
+const VERSION = 'slate-c3cfc63272';
 const ASSETS = [
   './',
   './index.html',
@@ -24,6 +24,13 @@ const ASSETS = [
   './icons/icon-512.png',
   './icons/icon-512-maskable.png',
   './icons/apple-touch-icon.png',
+  // C4: Library shell — precached so the wing works offline
+  './library.html',
+  './css/library.css',
+  './js/library-data.js',
+  './js/library-views.js',
+  './js/library-reader.js',
+  './js/library-user.js',
 ];
 
 self.addEventListener('install', (e) => {
@@ -44,6 +51,15 @@ self.addEventListener('fetch', (e) => {
   if (e.request.method !== 'GET') return;
   const url = new URL(e.request.url);
   if (url.origin !== self.location.origin) return;
+  // C4: Library DATA (/library/manifest.json, /library/articles/*, /library/assets/*,
+  // /library/search/*) stays NETWORK-ONLY — never precached (1 GB store not in git/cache).
+  // The shell (library.html + js/css) is in ASSETS and serves offline via cache-first.
+  // Use pathname.includes('/library/') so this works whether the app is deployed at root
+  // or under a subpath; the explicit check for .html prevents matching library.html itself.
+  if (url.pathname.includes('/library/') && !url.pathname.endsWith('.html')) {
+    e.respondWith(fetch(e.request));
+    return;
+  }
   e.respondWith(
     caches.match(e.request, { ignoreSearch: true }).then((hit) => hit || fetch(e.request))
   );

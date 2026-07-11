@@ -1,0 +1,21 @@
+{
+  "meta": {
+    "id": "fixture-locked-article",
+    "type": "article",
+    "source": "citrini",
+    "collection": "macro-memos",
+    "title": "Fixture Locked: Subscriber Only",
+    "subtitle": "This article is locked for non-subscribers",
+    "date": "2026-05-01T12:00:00.000Z",
+    "authors": ["Citrini"],
+    "tags": [],
+    "words": 2000,
+    "reading_min": 8,
+    "cover": null,
+    "audience": "subscriber",
+    "locked": true,
+    "original_url": "https://example.com/fixture-locked",
+    "path": "articles/fixture-locked-article.json"
+  },
+  "body_html": ""
+}

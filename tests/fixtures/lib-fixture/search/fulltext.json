@@ -1,0 +1,5 @@
+{
+  "fixture-macro-memo": "This is a synthetic fixture article used for CI testing of the Slate Library. It contains enough content to exercise the reader TOC generation and search features. The macro environment shows moderate growth. Interest rates remain stable. Equities performed as expected. Semiconductor exposure semis in the fixture portfolio is calibrated for testing search functionality. Fixture trade ideas include synthetic assets.",
+  "fixture-semis-memo": "This fixture semis article tests the spine-tile rendering path and the collection filter. Semiconductor supply chains in this synthetic universe are fully functional. The fixture supply chain consists of imaginary fabs synthetic wafers and test-grade chiplets. Power analog semis in the fixture universe trade at exactly fair value. DRAM and NAND fixture prices are stable. HBM fixture demand is strong.",
+  "fixture-locked-article": "Subscriber only content for the fixture locked article. This content would normally be restricted to paying subscribers of the Citrini research service."
+}
