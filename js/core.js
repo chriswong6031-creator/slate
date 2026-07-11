@@ -86,6 +86,7 @@ function tagColor(name) { // deterministic tag color from name
 
 /* ---------- state ---------- */
 const LS_KEY = 'slate.state.v1';
+const THEME_KEY = 'slate.theme.v1'; // own key so library-page writes never get clobbered by main-app saveNow
 let state = null;
 let zCounter = 10;
 
@@ -183,12 +184,58 @@ function loadState() {
   return seedState();
 }
 
+/* ---------- theme helpers (own key so cross-tab writes are never clobbered) ---------- */
+function loadThemePref() {
+  // 1. Dedicated key (authoritative, set by both pages)
+  const t = localStorage.getItem(THEME_KEY);
+  if (t === 'dark' || t === 'light') return t;
+  // 2. Legacy: migrate from old state.theme in slate.state.v1
+  try {
+    const s = JSON.parse(localStorage.getItem(LS_KEY) || '{}');
+    if (s.theme === 'dark' || s.theme === 'light') {
+      localStorage.setItem(THEME_KEY, s.theme);
+      return s.theme;
+    }
+  } catch (_) {}
+  return null;
+}
+function saveThemePref(t) {
+  localStorage.setItem(THEME_KEY, t);
+}
+
+/* ---------- sticky unsaved-changes banner (shown when saveNow fails) ---------- */
+let _saveBanner = null;
+function _showSaveBanner() {
+  if (_saveBanner) return; // already visible
+  const b = document.createElement('div');
+  b.id = 'slate-save-error-banner';
+  b.className = 'save-error-banner';
+  b.textContent = 'Not saving — storage full. Export a backup to avoid data loss.';
+  const cl = document.createElement('button');
+  cl.className = 'save-error-banner-close';
+  cl.textContent = '×';
+  cl.setAttribute('aria-label', 'Dismiss');
+  cl.addEventListener('click', () => { b.remove(); _saveBanner = null; });
+  b.appendChild(cl);
+  document.body.appendChild(b);
+  _saveBanner = b;
+}
+function _hideSaveBanner() {
+  if (_saveBanner) { _saveBanner.remove(); _saveBanner = null; }
+}
+
 const save = debounce(saveNow, 150);
 function saveNow() {
   try {
+    // Sync state.theme from the authoritative THEME_KEY before serialising,
+    // so a library-page theme toggle never gets clobbered by a main-app save.
+    const currentTheme = localStorage.getItem(THEME_KEY);
+    if (currentTheme && state.theme !== currentTheme) state.theme = currentTheme;
     localStorage.setItem(LS_KEY, JSON.stringify(state));
+    _hideSaveBanner(); // clear the sticky banner once a save succeeds
   } catch (e) {
     console.error('Slate: save failed', e);
+    _showSaveBanner(); // sticky banner, not a transient toast (C3)
     if (typeof toast === 'function') toast('Storage is full — remove some attachments or export a backup', { tone: 'danger' });
   }
 }

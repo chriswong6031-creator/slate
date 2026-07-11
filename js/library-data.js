@@ -223,17 +223,30 @@ function escHtml(s) {
 }
 
 /* ===== THEME ===== */
+const THEME_KEY = 'slate.theme.v1'; // dedicated key shared with main app (never clobbered by saveNow)
+
 function initTheme() {
-  // Read from slate.state.v1 (main app), fallback to prefers-color-scheme
-  let theme = null;
-  try {
-    const slateState = JSON.parse(localStorage.getItem('slate.state.v1') || '{}');
-    theme = slateState.theme || null;
-  } catch (_) {}
-  if (!theme) {
+  // 1. Dedicated key (written by both pages, never clobbered by main-app saveNow)
+  let theme = localStorage.getItem(THEME_KEY);
+  if (theme !== 'dark' && theme !== 'light') {
+    // 2. Legacy: migrate from slate.state.v1.theme
+    try {
+      const slateState = JSON.parse(localStorage.getItem('slate.state.v1') || '{}');
+      theme = slateState.theme || null;
+    } catch (_) {}
+  }
+  if (theme !== 'dark' && theme !== 'light') {
+    // 3. OS preference
     theme = matchMedia('(prefers-color-scheme:dark)').matches ? 'dark' : 'light';
   }
   applyTheme(theme);
+
+  // Cross-tab sync: main-app theme changes propagate here via storage event
+  window.addEventListener('storage', (e) => {
+    if (e.key !== THEME_KEY) return;
+    const t = e.newValue;
+    if (t === 'dark' || t === 'light') applyTheme(t);
+  });
 }
 
 function applyTheme(t) {
@@ -242,12 +255,8 @@ function applyTheme(t) {
   const moon = document.getElementById('lib-theme-moon');
   if (sun) sun.style.display = (t === 'dark') ? 'none' : '';
   if (moon) moon.style.display = (t === 'dark') ? '' : 'none';
-  // Persist back to slate.state.v1 so main app stays in sync
-  try {
-    const slateState = JSON.parse(localStorage.getItem('slate.state.v1') || '{}');
-    slateState.theme = t;
-    localStorage.setItem('slate.state.v1', JSON.stringify(slateState));
-  } catch (_) {}
+  // Write to dedicated key (does NOT touch slate.state.v1)
+  try { localStorage.setItem(THEME_KEY, t); } catch (_) {}
 }
 
 function toggleTheme() {

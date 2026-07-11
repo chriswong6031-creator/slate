@@ -502,13 +502,13 @@ function renderPreview(item) {
     coverHTML = '<div class="lib-pv-cover-ph ' + cls + '"><span class="lib-spine-bar"></span></div>';
   }
 
-  // Try to get first paragraph from cache
+  // Populate preview snippet: prefer subtitle, fall back to manifest body excerpt.
+  // The old _ftIndex / readerCache accessors were dead code (private vars, never exposed).
   let snippet = '';
-  const cached = window.LibData.readerCache && window.LibData.readerCache[item.id];
-  // Note: readerCache is internal, access via loadArticle
-  const snippetFromFT = window.LibData.ftLoaded ? (window.LibData._ftIndex && window.LibData._ftIndex[item.id] || '') : '';
-  if (snippetFromFT) {
-    snippet = snippetFromFT.slice(0, 300);
+  if (item.subtitle && item.subtitle.trim()) {
+    snippet = item.subtitle.trim().slice(0, 300);
+  } else if (item.body && item.body.trim()) {
+    snippet = item.body.trim().slice(0, 300);
   }
 
   const body =

@@ -441,6 +441,29 @@ function openComposer(editItem) {
     let fileKey = editItem ? editItem.fileKey : null;
 
     if (_attachedBlob) {
+      // C3: quota pre-check before storing the blob.
+      // Rule: reject only when file.size > remaining - headroom AND file.size > remaining
+      // (the floor ensures a small file is never blocked when remaining > file.size).
+      // headroom = min(GUARD_BYTES, remaining * 0.1) so the guard scales down for
+      // low-remaining states and never causes a false rejection when space is ample.
+      if (navigator.storage && navigator.storage.estimate) {
+        try {
+          const est = await navigator.storage.estimate();
+          const remaining = (est.quota || 0) - (est.usage || 0);
+          if (remaining > 0) {
+            const GUARD_BYTES = 500 * 1024 * 1024; // 500 MB nominal headroom
+            const headroom = Math.min(GUARD_BYTES, remaining * 0.1);
+            const tightOnSpace = _attachedBlob.size > remaining - headroom;
+            const wouldActuallyFit = _attachedBlob.size <= remaining; // floor: file fits → allow
+            if (tightOnSpace && !wouldActuallyFit) {
+              const fileMB = (_attachedBlob.size / 1048576).toFixed(1);
+              const freeMB = (remaining / 1048576).toFixed(0);
+              showLibToast(`PDF is ${fileMB} MB but only ~${freeMB} MB storage remains — free up space or export a backup first.`, 6000);
+              return;
+            }
+          }
+        } catch (_) {}
+      }
       type = 'pdf';
       fileKey = 'pdf-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6);
       try {
@@ -481,6 +504,65 @@ function escHtmlAttr(s) {
     .replace(/"/g, '&quot;');
 }
 
+/* ===== C1: Full library export — delegates to SlateBackupDB ===== */
+async function exportAll() {
+  if (window.SlateBackupDB && typeof window.SlateBackupDB.exportAll === 'function') {
+    return window.SlateBackupDB.exportAll();
+  }
+  // Fallback: direct IDB read (should not be reached when backup-db.js is loaded)
+  const items = await idbGetAll('items');
+  let fileRecs = [];
+  try { fileRecs = await idbGetAll('files'); } catch (_) {}
+  const files = {};
+  for (const rec of fileRecs) {
+    if (!rec || !rec.key || !rec.blob) continue;
+    try {
+      const b64 = await new Promise((resolve, reject) => {
+        const r = new FileReader();
+        r.onload = () => { const du = r.result; const c = du.indexOf(','); resolve(c >= 0 ? du.slice(c + 1) : du); };
+        r.onerror = reject;
+        r.readAsDataURL(rec.blob);
+      });
+      files[rec.key] = { b64, type: rec.blob.type || 'application/pdf', size: rec.blob.size };
+    } catch (_) {}
+  }
+  return { items, files };
+}
+
+/* ===== C1: Full library import — delegates to SlateBackupDB ===== */
+async function importAll(libraryPayload) {
+  let count = 0;
+  if (window.SlateBackupDB && typeof window.SlateBackupDB.importAll === 'function') {
+    count = await window.SlateBackupDB.importAll(libraryPayload);
+  } else {
+    // Fallback direct path
+    const { items = [], files = {} } = libraryPayload || {};
+    for (const item of items) { try { await idbPut('items', item); } catch (_) {} }
+    for (const [key, fileData] of Object.entries(files)) {
+      if (!fileData) continue;
+      try {
+        const raw = fileData.b64 || fileData.base64;
+        let blob;
+        if (raw) {
+          const bin = atob(raw);
+          const arr = new Uint8Array(bin.length);
+          for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+          blob = new Blob([arr], { type: fileData.type || 'application/pdf' });
+        } else if (fileData instanceof Blob) {
+          blob = fileData;
+        }
+        if (blob) await idbPut('files', { key, blob });
+      } catch (_) {}
+    }
+    count = (libraryPayload && libraryPayload.items ? libraryPayload.items.length : 0);
+  }
+
+  // Reload in-memory list
+  await loadUserItems();
+  mergeIntoAllItems();
+  return count;
+}
+
 /* ===== IDB availability check ===== */
 function isAvailable() { return _idbAvailable; }
 
@@ -500,6 +582,8 @@ return {
   isAvailable,
   showLibToast,
   showUndoToast,
+  exportAll,
+  importAll,
 };
 
 })();

@@ -112,11 +112,14 @@ function paletteIndex() {
     save();
     navToIndex();
   } });
-  out.push({ type: 'action', label: 'Toggle dark mode', hint: 'Theme', run: () => {
-    state.theme = state.theme === 'dark' ? 'light' : 'dark';
-    save();
-    applyTheme();
-  } });
+  out.push({ type: 'action',
+    label: state.theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode',
+    hint: 'Theme', run: () => {
+      state.theme = state.theme === 'dark' ? 'light' : 'dark';
+      saveThemePref(state.theme);
+      save();
+      applyTheme();
+    } });
   out.push({ type: 'action', label: 'Tidy boards', hint: 'Boards', run: () => {
     closeAnyModal();
     state.view = 'tasks';
@@ -125,6 +128,7 @@ function paletteIndex() {
     tidyBoards();
   } });
   out.push({ type: 'action', label: 'Export backup', hint: 'Data', run: () => exportBackup() });
+  out.push({ type: 'action', label: 'Export Brain as Markdown', hint: 'Data', run: () => exportBrainMarkdown() });
 
   for (const w of state.ws) {
     out.push({ type: 'ws', label: w.name, hint: w.boards.length + (w.boards.length === 1 ? ' board' : ' boards'), run: () => {

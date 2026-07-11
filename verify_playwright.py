@@ -691,6 +691,101 @@ with sync_playwright() as pw:
     check("malformed brain: no JS errors", not errs4, "; ".join(errs4[:3]))
     ctx4.close()
 
+    # --- WAVE 1 ACCEPTANCE CHECKS ---
+    # A2: Dedicated theme key slate.theme.v1 — read/write by main page; not clobbered by saveNow
+    ctx5 = browser.new_context(viewport={"width": 1440, "height": 900})
+    p5 = ctx5.new_page()
+    p5.goto(BASE)
+    p5.wait_for_timeout(500)
+    # Toggle theme via themeBtn and verify the dedicated key is written
+    p5.locator("#themeBtn").click()
+    p5.wait_for_timeout(200)
+    theme_key_val = p5.evaluate("localStorage.getItem('slate.theme.v1')")
+    dom_theme = p5.evaluate("document.documentElement.dataset.theme")
+    check("w1-A2: slate.theme.v1 key written on toggle", theme_key_val in ("dark", "light"), str(theme_key_val))
+    check("w1-A2: dedicated theme key matches DOM", theme_key_val == dom_theme,
+          f"key={theme_key_val} dom={dom_theme}")
+    # Verify saveNow does NOT clobber the dedicated key: set theme.v1 out-of-band then trigger a save
+    p5.evaluate(
+        "() => { localStorage.setItem('slate.theme.v1', 'light'); "
+        "state.theme = 'dark'; saveNow(); }")
+    p5.wait_for_timeout(100)
+    after_save_key = p5.evaluate("localStorage.getItem('slate.theme.v1')")
+    saved_state_theme = p5.evaluate(
+        "() => JSON.parse(localStorage.getItem('slate.state.v1') || '{}').theme")
+    check("w1-A2: saveNow syncs theme from dedicated key (no clobber)",
+          after_save_key == 'light' and saved_state_theme == 'light',
+          f"key={after_save_key} state.theme={saved_state_theme}")
+    ctx5.close()
+
+    # UX-01: Card modal has visible close button (.modal-close-btn)
+    ctx6 = browser.new_context(viewport={"width": 1440, "height": 900})
+    p6 = ctx6.new_page()
+    p6.goto(BASE)
+    p6.wait_for_timeout(400)
+    # Open a card modal
+    p6.locator(".card").first.click()
+    p6.wait_for_timeout(350)
+    close_btn = p6.locator(".modal-close-btn")
+    check("w1-UX-01: modal has close button", close_btn.count() == 1)
+    check("w1-UX-01: close button is visible", close_btn.is_visible())
+    close_btn.click()
+    p6.wait_for_timeout(300)
+    check("w1-UX-01: close button dismisses modal", p6.locator(".modal").count() == 0)
+    ctx6.close()
+
+    # UX-09: Palette theme toggle shows current-aware label
+    ctx7 = browser.new_context(viewport={"width": 1440, "height": 900})
+    p7 = ctx7.new_page()
+    p7.goto(BASE)
+    p7.wait_for_timeout(400)
+    # In light mode, label should mention "dark" (switch to dark)
+    p7.keyboard.press("Control+k")
+    p7.wait_for_timeout(200)
+    p7.locator(".palette-input").fill("Switch")
+    p7.wait_for_timeout(200)
+    label_rows = p7.locator(".palette-row").all_text_contents()
+    has_switch_label = any("Switch to" in t and ("dark" in t or "light" in t) for t in label_rows)
+    check("w1-UX-09: palette theme action has current-aware label", has_switch_label, str(label_rows[:5]))
+    p7.keyboard.press("Escape")
+    p7.wait_for_timeout(100)
+    ctx7.close()
+
+    # C8: Global unhandledrejection fires rate-limited toast
+    ctx8 = browser.new_context(viewport={"width": 1440, "height": 900})
+    p8 = ctx8.new_page()
+    p8.goto(BASE)
+    p8.wait_for_timeout(500)
+    # Fire an unhandledrejection and check a toast appears within 2s
+    p8.evaluate("window.dispatchEvent(Object.assign(new Event('unhandledrejection'), {reason: new Error('test-err-c8'), promise: Promise.reject('x')}))")
+    p8.wait_for_timeout(600)
+    toast_visible = p8.locator(".toast").count() >= 1
+    check("w1-C8: unhandledrejection shows rate-limited toast", toast_visible)
+    ctx8.close()
+
+    # C1: Backup v2 — LibUser.exportAll works on library.html (items + files structure)
+    ctx9 = browser.new_context(viewport={"width": 1440, "height": 900})
+    p9 = ctx9.new_page()
+    lib_url = BASE.rstrip("/") + "/library.html"
+    p9.goto(lib_url, wait_until="domcontentloaded")
+    p9.wait_for_timeout(800)
+    # Check LibUser is available and exportAll returns correct shape
+    lib_export_shape = p9.evaluate(
+        "async () => {"
+        "  if (!window.LibUser || typeof window.LibUser.exportAll !== 'function') "
+        "    return {available: false};"
+        "  const exp = await window.LibUser.exportAll();"
+        "  return { available: true, itemsIsArray: Array.isArray(exp.items),"
+        "           filesIsObj: typeof exp.files === 'object' && exp.files !== null };"
+        "}")
+    check("w1-C1: LibUser.exportAll available on library page",
+          lib_export_shape.get("available", False), str(lib_export_shape))
+    check("w1-C1: exportAll returns items array",
+          lib_export_shape.get("itemsIsArray", False), str(lib_export_shape))
+    check("w1-C1: exportAll returns files object",
+          lib_export_shape.get("filesIsObj", False), str(lib_export_shape))
+    ctx9.close()
+
     browser.close()
 
 fails = [r for r in results if not r[1]]

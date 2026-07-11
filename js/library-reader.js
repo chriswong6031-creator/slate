@@ -8,6 +8,7 @@ const D = window.LibData;
 const V = window.LibViews;
 
 let tocObserver = null;
+let _openGeneration = 0; // incremented each open(); stale fetch guards compare against it
 
 /* ===== OPEN READER ===== */
 let _pdfBlobUrl = null;  // revoke on close
@@ -16,6 +17,10 @@ async function open(idx) {
   D.readerIdx = idx;
   const item = D.filteredItems[idx];
   if (!item) return;
+
+  // Generation guard: stale async fetches (article JSON, PDF blob) must not
+  // clobber a newer open() that already landed. Increment BEFORE any await.
+  const myGen = ++_openGeneration;
 
   // Update hash
   D.pushHash('#/read/' + encodeURIComponent(item.id));
@@ -56,7 +61,7 @@ async function open(idx) {
 
   // User PDF
   if (item.source === 'user' && item.type === 'pdf') {
-    await _renderUserPdf(item, scroll);
+    await _renderUserPdf(item, scroll, myGen);
     return;
   }
 
@@ -69,6 +74,8 @@ async function open(idx) {
 
   try {
     const art = await D.loadArticle(item.id);
+    // Bail if another open() was called while we were awaiting (stale fetch guard)
+    if (_openGeneration !== myGen) return;
     if (bodyEl) {
       let html = art.body_html || '<p>No content available.</p>';
       html = html.replace(/src="assets\//g, 'src="library/assets/');
@@ -83,6 +90,7 @@ async function open(idx) {
     _buildTOC(bodyEl);
     _initProgress(scroll, bodyEl);
   } catch (e) {
+    if (_openGeneration !== myGen) return;
     if (bodyEl) {
       bodyEl.innerHTML = '<p style="color:var(--danger)">Could not load article: ' + D.escHtml(e.message) + '</p>';
     }
@@ -119,7 +127,7 @@ function _renderUserWriteup(item, scroll) {
 }
 
 /* ===== USER PDF RENDER ===== */
-async function _renderUserPdf(item, scroll) {
+async function _renderUserPdf(item, scroll, myGen) {
   const bodyEl = document.getElementById('lib-article-body');
   if (!bodyEl) return;
 
@@ -136,6 +144,8 @@ async function _renderUserPdf(item, scroll) {
 
   try {
     const blobUrl = await window.LibUser.getFileBlobUrl(item.fileKey);
+    // Bail if another open() superseded us while awaiting the IDB fetch
+    if (myGen !== undefined && _openGeneration !== myGen) return;
     if (!blobUrl) {
       bodyEl.innerHTML = '<p style="color:var(--danger)">PDF file not found in storage.</p>';
       return;
@@ -157,6 +167,7 @@ async function _renderUserPdf(item, scroll) {
         '</div>' +
       '</div>';
   } catch (e) {
+    if (myGen !== undefined && _openGeneration !== myGen) return;
     bodyEl.innerHTML = '<p style="color:var(--danger)">Failed to load PDF: ' + D.escHtml(e.message) + '</p>';
   }
 }

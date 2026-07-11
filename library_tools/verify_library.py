@@ -427,6 +427,247 @@ def run(base_url: str) -> int:
             reader_delete()
             page.wait_for_timeout(6800)
 
+        # ── Wave 1 acceptance checks ─────────────────────────────────────────
+
+        # W1-A2: Library page writes/reads slate.theme.v1 dedicated key (not slate.state.v1)
+        page.goto(lib_url, wait_until='domcontentloaded')
+        page.wait_for_selector('.lib-card[data-idx]', timeout=25000)
+        page.wait_for_timeout(400)
+        # Toggle theme, then check dedicated key
+        cur_theme_before = page.evaluate("document.documentElement.getAttribute('data-theme') || 'light'")
+        page.click('#lib-theme-btn')
+        page.wait_for_timeout(200)
+        theme_key_after = page.evaluate("localStorage.getItem('slate.theme.v1')")
+        dom_theme_after = page.evaluate("document.documentElement.getAttribute('data-theme')")
+        if not check('W1-A2: library page writes slate.theme.v1 on toggle',
+                     theme_key_after in ('dark', 'light'),
+                     f'key={theme_key_after!r}'): failures += 1
+        if not check('W1-A2: slate.theme.v1 matches DOM',
+                     theme_key_after == dom_theme_after,
+                     f'key={theme_key_after!r} dom={dom_theme_after!r}'): failures += 1
+        # main state key must NOT have theme written by the library toggle
+        state_key_val = page.evaluate(
+            "() => { try { return JSON.parse(localStorage.getItem('slate.state.v1')||'{}').theme || null; } catch (_) { return null; } }")
+        # state.v1 may be absent (different origin/browser context) — pass if absent or consistent with dedicated key
+        state_theme_ok = state_key_val is None or state_key_val == theme_key_after
+        if not check('W1-A2: library page does not clobber slate.state.v1 theme',
+                     state_theme_ok,
+                     f'state.v1.theme={state_key_val!r} key={theme_key_after!r}'): failures += 1
+        # Reset
+        if dom_theme_after != cur_theme_before:
+            page.click('#lib-theme-btn')
+            page.wait_for_timeout(100)
+
+        # ── W1-C1 (hardened): backup round-trips through the REAL user path ────
+        # Use a fresh browser context so no IDB data leaks from earlier in the run.
+        ctx_c1 = browser.new_context(viewport={'width': 1440, 'height': 900})
+        p_c1 = ctx_c1.new_page()
+        p_c1.goto(lib_url, wait_until='domcontentloaded')
+        p_c1.wait_for_timeout(800)
+
+        # 1. Seed: add a write-up and a tiny PDF via the composer on library.html
+        p_c1.evaluate(
+            "async () => {"
+            "  if (!window.LibUser) throw new Error('LibUser not loaded');"
+            "  await window.LibUser.saveItem({type:'writeup',title:'C1 Writeup Seed',"
+            "    folder:'C1Test',body:'Round-trip test body'});"
+            # Tiny valid PDF bytes stored as a Blob
+            "  const pdfBytes = new Uint8Array([0x25,0x50,0x44,0x46,0x2d,0x31,0x2e,0x34,0x0a,0x25,0x45,0x4f,0x46,0x0a]);"
+            "  const blob = new Blob([pdfBytes], {type:'application/pdf'});"
+            "  const key = 'pdf-c1-test-001';"
+            "  await window.LibUser.saveFileBlob(key, blob);"
+            "  await window.LibUser.saveItem({type:'pdf',title:'C1 PDF Seed',"
+            "    folder:'C1Test',body:'',fileKey:key,size:pdfBytes.length});"
+            "}")
+        p_c1.wait_for_timeout(400)
+
+        # 2. Navigate to index.html and call exportBackup via SlateBackupDB directly
+        #    (this is the real path: index.html has no LibUser, only SlateBackupDB)
+        p_c1.goto(base_url.rstrip('/') + '/index.html', wait_until='domcontentloaded')
+        p_c1.wait_for_timeout(600)
+
+        backup_payload = p_c1.evaluate(
+            "async () => {"
+            "  if (!window.SlateBackupDB) return {error: 'SlateBackupDB not loaded'};"
+            "  const lib = await window.SlateBackupDB.exportAll();"
+            "  return lib;"
+            "}")
+        items_len = len(backup_payload.get('items', [])) if isinstance(backup_payload, dict) else 0
+        files_obj = backup_payload.get('files', {}) if isinstance(backup_payload, dict) else {}
+        has_pdf_entry = any(True for k, v in files_obj.items()
+                            if isinstance(v, dict) and v.get('b64'))
+        if not check('W1-C1: SlateBackupDB.exportAll on index.html returns ≥2 items',
+                     items_len >= 2, f'items={items_len}'): failures += 1
+        if not check('W1-C1: exportAll includes PDF file with b64 data',
+                     has_pdf_entry, f'files keys={list(files_obj.keys())[:5]}'): failures += 1
+
+        # 3. Clear IDB, then import via SlateBackupDB on index.html
+        p_c1.evaluate(
+            "async () => {"
+            "  await new Promise((res, rej) => {"
+            "    const r = indexedDB.deleteDatabase('slate-library-db');"
+            "    r.onsuccess = res; r.onerror = rej;"
+            "  });"
+            "}")
+        p_c1.wait_for_timeout(300)
+
+        import_count = p_c1.evaluate(
+            "async (payload) => {"
+            "  if (!window.SlateBackupDB) return -1;"
+            "  return window.SlateBackupDB.importAll(payload);"
+            "}", backup_payload)
+        if not check('W1-C1: SlateBackupDB.importAll returns correct count',
+                     import_count >= 2, f'count={import_count}'): failures += 1
+
+        # 4. Navigate to library.html and assert both items render + PDF opens
+        p_c1.goto(lib_url, wait_until='domcontentloaded')
+        p_c1.wait_for_timeout(1200)
+        writeup_visible = p_c1.evaluate(
+            "() => document.body.innerHTML.includes('C1 Writeup Seed')")
+        pdf_visible = p_c1.evaluate(
+            "() => document.body.innerHTML.includes('C1 PDF Seed')")
+        if not check('W1-C1: writeup item renders after import on library.html',
+                     writeup_visible): failures += 1
+        if not check('W1-C1: PDF item renders after import on library.html',
+                     pdf_visible): failures += 1
+
+        # 5. Open the PDF item and verify the embedded viewer appears
+        pdf_found = False
+        if pdf_visible:
+            # Click the PDF card (may be in hero or grid)
+            pdf_el = p_c1.query_selector('.lib-card:has-text("C1 PDF Seed")')
+            hero_title = p_c1.query_selector('#lib-hero-title')
+            if hero_title and 'C1 PDF Seed' in (hero_title.text_content() or ''):
+                p_c1.click('#lib-hero')
+            elif pdf_el:
+                pdf_el.click()
+            p_c1.wait_for_timeout(800)
+            pdf_found = p_c1.query_selector(
+                '#lib-reader object[type="application/pdf"], '
+                '#lib-reader embed[type="application/pdf"]') is not None
+        if not check('W1-C1: PDF opens in embedded viewer after round-trip restore',
+                     pdf_found): failures += 1
+
+        ctx_c1.close()
+
+        # ── W1-C7 (hardened): manifest abort → user content + offline notice ──
+        # Use a fresh context so we can intercept the network cleanly.
+        ctx_c7 = browser.new_context(viewport={'width': 1440, 'height': 900})
+        p_c7 = ctx_c7.new_page()
+
+        # Pre-seed a user item in IDB before the page loads
+        p_c7.goto(lib_url, wait_until='domcontentloaded')
+        p_c7.wait_for_timeout(600)
+        p_c7.evaluate(
+            "async () => {"
+            "  if (!window.LibUser) return;"
+            "  await window.LibUser.saveItem({type:'writeup',title:'W1-C7 Resilience Test',"
+            "    folder:'Tests',body:'Should survive manifest failure'});"
+            "}")
+        p_c7.wait_for_timeout(300)
+
+        # Abort ALL manifest.json requests to simulate offline/error
+        p_c7.route('**/manifest.json', lambda route: route.abort())
+
+        # Reload — the page must not block on the failed manifest
+        p_c7.reload(wait_until='domcontentloaded')
+        p_c7.wait_for_timeout(1500)
+
+        # Assert user content still renders
+        user_item_visible = p_c7.evaluate(
+            "() => { const hero = document.getElementById('lib-hero-title'); "
+            "  if (hero && hero.textContent.includes('W1-C7')) return true; "
+            "  return document.body.innerHTML.includes('W1-C7 Resilience Test'); }")
+        if not check('W1-C7: user item visible when manifest is aborted',
+                     user_item_visible): failures += 1
+
+        # Assert the offline notice is visible (in #lib-notice-slot, outside the grid)
+        offline_notice_visible = p_c7.evaluate(
+            "() => { const slot = document.getElementById('lib-notice-slot');"
+            "  return slot && slot.querySelector('.lib-citrini-offline') !== null; }")
+        if not check('W1-C7: offline notice visible in #lib-notice-slot when manifest fails',
+                     offline_notice_visible): failures += 1
+
+        # Assert the grid itself was NOT wiped (cards or hero must be present)
+        grid_intact = p_c7.evaluate(
+            "() => document.querySelectorAll('.lib-card[data-idx]').length > 0"
+            "   || (document.getElementById('lib-hero') || {style:{display:'none'}}).style.display !== 'none'")
+        if not check('W1-C7: grid renders user content despite manifest failure',
+                     grid_intact): failures += 1
+
+        # Cleanup
+        p_c7.evaluate(
+            "async () => {"
+            "  if (!window.LibUser) return;"
+            "  const items = window.LibUser.getUserItems();"
+            "  const t = items.find(i => i.title === 'W1-C7 Resilience Test');"
+            "  if (t) await window.LibUser.deleteItem(t.id);"
+            "}")
+        p_c7.wait_for_timeout(7000)
+        ctx_c7.close()
+
+        # ── W1-C3: small PDF accepted when plenty of space remains ──────────
+        ctx_c3 = browser.new_context(viewport={'width': 1440, 'height': 900})
+        p_c3 = ctx_c3.new_page()
+        p_c3.goto(lib_url, wait_until='domcontentloaded')
+        p_c3.wait_for_timeout(600)
+
+        # Stub navigator.storage.estimate to report 300 MB remaining
+        p_c3.evaluate(
+            "() => { const orig = navigator.storage.estimate.bind(navigator.storage);"
+            "  navigator.storage.estimate = async () => ({ quota: 300*1024*1024, usage: 0 }); }")
+
+        # Open the composer and attach a 1 MB PDF
+        p_c3.click('#lib-sb-new-post')
+        p_c3.wait_for_timeout(300)
+        p_c3.fill('#lib-c-title', 'W1-C3 Quota Test PDF')
+
+        # Write a 1 MB dummy PDF to /tmp
+        pdf_1mb_path = '/tmp/slate_c3_1mb_test.pdf'
+        _pdf_header = (b'%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n'
+                       b'2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj\n'
+                       b'3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 612 792]>>endobj\n'
+                       b'xref\n0 4\n0000000000 65535 f \n0000000009 00000 n \n'
+                       b'0000000052 00000 n \n0000000101 00000 n \n'
+                       b'trailer<</Size 4/Root 1 0 R>>\nstartxref\n164\n%%EOF\n')
+        with open(pdf_1mb_path, 'wb') as f:
+            f.write(_pdf_header + b'\x00' * (1024 * 1024 - len(_pdf_header)))
+
+        p_c3.set_input_files('#lib-c-pdf', pdf_1mb_path)
+        p_c3.wait_for_timeout(300)
+
+        # The label should show the filename (not rejected)
+        label_text = p_c3.evaluate("() => (document.getElementById('lib-pdf-label') || {}).textContent || ''")
+        accepted = 'W1-C3 Quota Test PDF'.lower() not in label_text.lower() and \
+                   ('slate_c3_1mb_test' in label_text or 'KB' in label_text or 'MB' in label_text)
+        # More direct: try to save and check no rejection toast appeared
+        toast_before = p_c3.evaluate("() => (document.getElementById('lib-toast') || {}).classList.contains('show')")
+        p_c3.click('#lib-composer-save')
+        p_c3.wait_for_timeout(700)
+        toast_text = p_c3.evaluate("() => (document.querySelector('.lib-toast-msg') || {}).textContent || ''")
+        # Rejection toast would say "only ~" + MB; acceptance produces "Post added"
+        rejected = 'only ~' in toast_text and 'MB storage remains' in toast_text
+        saved = 'Post added' in toast_text or 'added to library' in toast_text.lower()
+        if not check('W1-C3: 1 MB PDF accepted with 300 MB remaining (no false rejection)',
+                     not rejected, f'toast={toast_text!r}'): failures += 1
+        if not check('W1-C3: PDF post saved successfully',
+                     saved, f'toast={toast_text!r}'): failures += 1
+
+        # Cleanup
+        p_c3.evaluate(
+            "async () => {"
+            "  if (!window.LibUser) return;"
+            "  const items = window.LibUser.getUserItems();"
+            "  const t = items.find(i => i.title === 'W1-C3 Quota Test PDF');"
+            "  if (t) await window.LibUser.deleteItem(t.id);"
+            "}")
+        p_c3.wait_for_timeout(7000)
+        ctx_c3.close()
+        try:
+            os.unlink(pdf_1mb_path)
+        except Exception:
+            pass
+
         browser.close()
 
     return failures

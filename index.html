@@ -102,6 +102,7 @@
 <script src="js/ui.js"></script>
 <script src="js/brain.js"></script>
 <script src="js/palette.js"></script>
+<script src="js/backup-db.js"></script>
 <script src="js/app.js"></script>
 <script id="sw-register">
 if ('serviceWorker' in navigator && location.protocol !== 'file:') {
@@ -109,6 +110,30 @@ if ('serviceWorker' in navigator && location.protocol !== 'file:') {
     navigator.serviceWorker.register('sw.js').catch((e) => console.warn('Slate: SW registration failed', e));
   });
 }
+</script>
+<script id="error-handlers">
+/* C8: Global error handlers — surface async failures as a quiet rate-limited toast */
+(function() {
+  let _errToastMs = 0;
+  const _ERR_RATE_LIMIT = 5000; // ms between error toasts
+  function _showErrToast(msg) {
+    const now = Date.now();
+    if (now - _errToastMs < _ERR_RATE_LIMIT) return;
+    _errToastMs = now;
+    if (typeof toast === 'function') {
+      toast('Something went wrong — your last action may not have saved. Export a backup if in doubt.', { tone: 'danger', ms: 6000 });
+    }
+    console.warn('Slate: unhandled error:', msg);
+  }
+  window.addEventListener('unhandledrejection', e => {
+    _showErrToast(e.reason && (e.reason.message || String(e.reason)));
+  });
+  window.addEventListener('error', e => {
+    // Skip favicon/asset 404s (those are not JS errors)
+    if (e.filename && !/\.(js)$/i.test(e.filename)) return;
+    _showErrToast(e.message);
+  });
+})();
 </script>
 </body>
 </html>
