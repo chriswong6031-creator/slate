@@ -43,8 +43,7 @@ function bringToFront(boardNode) {
   vp.addEventListener('scroll', debounce(saveScroll, 300));
 
   function saveScroll() {
-    if (state.view === 'brain') { // brain scroll is session-only, and never clobbers workspace scroll
-      if (brainTab === 'board') { brainScroll.x = vp.scrollLeft; brainScroll.y = vp.scrollTop; }
+    if (state.view === 'brain') { // brain root has its own scroll, never clobbers workspace scroll
       return;
     }
     const ws = activeWs();

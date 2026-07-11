@@ -440,11 +440,7 @@ function openSettings() {
     save();
     renderAll();
   }));
-  $$('#brainTabs .seg-btn').forEach(b => b.addEventListener('click', () => {
-    if (brainTab === b.dataset.tab) return;
-    brainTab = b.dataset.tab;
-    renderAll();
-  }));
+  // brainTabs sub-seg removed in v2 — no listeners needed
   $('#themeBtn').addEventListener('click', () => {
     state.theme = state.theme === 'dark' ? 'light' : 'dark';
     save();

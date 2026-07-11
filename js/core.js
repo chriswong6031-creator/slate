@@ -102,7 +102,8 @@ function newCategory(name) {
   return { id: uid(), name: name, notes: [] };
 }
 function newNote(text) {
-  return { id: uid(), text: text, created: Date.now() };
+  const now = Date.now();
+  return { id: uid(), text: text, created: now, updated: now };
 }
 
 /* additive defaults for states saved before a feature existed, plus shape
@@ -124,6 +125,9 @@ function migrateState(s) {
           id: typeof n.id === 'string' ? n.id : uid(),
           text: n.text,
           created: typeof n.created === 'number' ? n.created : Date.now(),
+          // v2: optional title (string) and updated (ms number) — preserved when present
+          ...(typeof n.title === 'string' ? { title: n.title } : {}),
+          ...(typeof n.updated === 'number' ? { updated: n.updated } : {}),
         })),
     }));
   return s;

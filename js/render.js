@@ -22,7 +22,7 @@ function renderTopbar() {
   $('#wsName').textContent = activeWs().name;
   document.title = brain ? 'Brain — Slate' : activeWs().name + ' — Slate';
   $$('#viewSeg .seg-btn').forEach(b => b.classList.toggle('active', (state.view || 'tasks') === b.dataset.view));
-  $$('#brainTabs .seg-btn').forEach(b => b.classList.toggle('active', brainTab === b.dataset.tab));
+  // brainTabs seg-sub is hidden in v2; no active-state update needed
 }
 
 function renderCanvas() {
@@ -223,17 +223,18 @@ let lastViewRendered = null;
 function renderAll() {
   applyTheme();
   document.body.dataset.view = state.view || 'tasks';
-  document.body.dataset.tab = state.view === 'brain' ? brainTab : 'board';
+  // brainPane is set by brain.js navigation; used by brain CSS
+  document.body.dataset.brainPane = (state.view === 'brain') ? (typeof brainPane !== 'undefined' ? brainPane : 'index') : '';
   renderTopbar();
   const viewChanged = lastViewRendered !== state.view;
   lastViewRendered = state.view;
   if (state.view === 'brain') {
     renderBrain();
+    if (viewChanged) fadeIn($('#brainRoot'));
   } else {
-    lastBrainTabRendered = null; // next brain entry is a fresh tab entry
     renderCanvas();
+    if (viewChanged) fadeIn($('#viewport'));
   }
-  if (viewChanged) fadeIn($('#viewport'));
 }
 
 function fadeIn(node) {
