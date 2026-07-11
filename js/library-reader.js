@@ -10,6 +10,8 @@ const V = window.LibViews;
 let tocObserver = null;
 
 /* ===== OPEN READER ===== */
+let _pdfBlobUrl = null;  // revoke on close
+
 async function open(idx) {
   D.readerIdx = idx;
   const item = D.filteredItems[idx];
@@ -21,6 +23,9 @@ async function open(idx) {
   const rv = document.getElementById('lib-reader');
   if (!rv) return;
   rv.classList.add('open');
+
+  // Revoke any previous PDF blob URL
+  if (_pdfBlobUrl) { URL.revokeObjectURL(_pdfBlobUrl); _pdfBlobUrl = null; }
 
   // Topbar
   const titleBar = document.getElementById('lib-reader-title-bar');
@@ -40,25 +45,33 @@ async function open(idx) {
   const bar = document.getElementById('lib-read-progress');
   if (bar) bar.style.width = '0%';
 
-  // Populate header
+  // Populate header (modified for user items)
   _renderHeader(item);
 
-  // Skeleton body while loading
+  // User write-up
+  if (item.source === 'user' && item.type === 'writeup') {
+    _renderUserWriteup(item, scroll);
+    return;
+  }
+
+  // User PDF
+  if (item.source === 'user' && item.type === 'pdf') {
+    await _renderUserPdf(item, scroll);
+    return;
+  }
+
+  // Citrini article
   const bodyEl = document.getElementById('lib-article-body');
   if (bodyEl) {
     bodyEl.innerHTML =
       '<div class="lib-skel" style="height:1em;width:80%;margin-bottom:1em"></div>'.repeat(6);
   }
 
-  // Load article
   try {
     const art = await D.loadArticle(item.id);
     if (bodyEl) {
-      // Rewrite relative asset paths: "assets/<slug>/..." → "library/assets/<slug>/..."
-      // Article body_html uses paths relative to library/ but page is at root.
       let html = art.body_html || '<p>No content available.</p>';
       html = html.replace(/src="assets\//g, 'src="library/assets/');
-      // Open external links in new tab
       bodyEl.innerHTML = html;
       bodyEl.querySelectorAll('a[href]').forEach(a => {
         if (a.hostname && a.hostname !== location.hostname) {
@@ -76,29 +89,107 @@ async function open(idx) {
   }
 }
 
+/* ===== USER WRITEUP RENDER ===== */
+function _renderUserWriteup(item, scroll) {
+  const bodyEl = document.getElementById('lib-article-body');
+  if (!bodyEl) return;
+
+  // Render paragraphs with escaped text + auto-linked URLs
+  const raw = item.body || '';
+  const escaped = D.escHtml(raw);
+
+  // Auto-link URLs in escaped text
+  const linked = escaped.replace(
+    /https?:\/\/[^\s&<>"']+/g,
+    url => '<a href="' + url + '" target="_blank" rel="noopener noreferrer">' + url + '</a>'
+  );
+
+  // Split by newlines into paragraphs
+  const paras = linked.split(/\n\n+/).filter(p => p.trim());
+  if (paras.length) {
+    bodyEl.innerHTML = paras.map(p =>
+      '<p>' + p.replace(/\n/g, '<br>') + '</p>'
+    ).join('');
+  } else {
+    bodyEl.innerHTML = '<p style="color:var(--ink-3);font-style:italic">No content yet.</p>';
+  }
+
+  _buildTOC(bodyEl);
+  _initProgress(scroll, bodyEl);
+}
+
+/* ===== USER PDF RENDER ===== */
+async function _renderUserPdf(item, scroll) {
+  const bodyEl = document.getElementById('lib-article-body');
+  if (!bodyEl) return;
+
+  // Show the toc rail as empty for PDFs
+  const tocEl = document.getElementById('lib-toc-items');
+  if (tocEl) tocEl.innerHTML = '';
+
+  if (!item.fileKey || !window.LibUser) {
+    bodyEl.innerHTML = '<p style="color:var(--ink-3)">No PDF file attached.</p>';
+    return;
+  }
+
+  bodyEl.innerHTML = '<p style="color:var(--ink-3)">Loading PDF…</p>';
+
+  try {
+    const blobUrl = await window.LibUser.getFileBlobUrl(item.fileKey);
+    if (!blobUrl) {
+      bodyEl.innerHTML = '<p style="color:var(--danger)">PDF file not found in storage.</p>';
+      return;
+    }
+    _pdfBlobUrl = blobUrl;
+
+    // Height: full column minus a bit for download link
+    bodyEl.innerHTML =
+      '<div class="lib-pdf-viewer">' +
+        '<object class="lib-pdf-embed" data="' + blobUrl + '" type="application/pdf">' +
+          '<p style="color:var(--ink-2)">Your browser cannot display embedded PDFs. ' +
+          '<a href="' + blobUrl + '" download="' + D.escHtml(item.title) + '.pdf">Download PDF</a></p>' +
+        '</object>' +
+        '<div class="lib-pdf-download-row">' +
+          '<a class="lib-pdf-download-btn" href="' + blobUrl + '" download="' + D.escHtml(item.title) + '.pdf">' +
+            '<svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M8 3v7M5 8l3 3 3-3M3 13h10"/></svg>' +
+            'Download PDF' +
+          '</a>' +
+        '</div>' +
+      '</div>';
+  } catch (e) {
+    bodyEl.innerHTML = '<p style="color:var(--danger)">Failed to load PDF: ' + D.escHtml(e.message) + '</p>';
+  }
+}
+
 function _renderHeader(item) {
+  const isUser = item.source === 'user';
   const meta = D.collMeta(item.collection);
   const cls = D.collCls(item.collection);
 
   const collEl = document.getElementById('lib-article-coll');
   if (collEl) {
-    collEl.textContent = meta.label;
-    collEl.className = 'lib-article-coll-pill ' + cls;
+    if (isUser) {
+      collEl.textContent = item.folder || 'My Library';
+      collEl.className = 'lib-article-coll-pill lib-user-coll-pill';
+    } else {
+      collEl.textContent = meta.label;
+      collEl.className = 'lib-article-coll-pill ' + cls;
+    }
   }
   const titleEl = document.getElementById('lib-article-title');
   if (titleEl) titleEl.textContent = item.title;
   const subEl = document.getElementById('lib-article-subtitle');
-  if (subEl) subEl.textContent = item.subtitle || '';
+  if (subEl) subEl.textContent = isUser ? '' : (item.subtitle || '');
   const authorEl = document.getElementById('lib-article-author');
-  if (authorEl) authorEl.textContent = (item.authors || []).join(', ') || 'Citrini';
+  if (authorEl) authorEl.textContent = isUser ? 'Me' : ((item.authors || []).join(', ') || 'Citrini');
   const dateEl = document.getElementById('lib-article-date');
   if (dateEl) dateEl.textContent = D.fmtDate(item.date);
   const readEl = document.getElementById('lib-article-reading');
-  if (readEl) readEl.textContent = D.fmtReading(item.reading_min);
+  if (readEl) readEl.textContent = item.reading_min ? D.fmtReading(item.reading_min) : '';
 
   // Cover image
   const coverImg = document.getElementById('lib-article-cover-img');
-  const url = D.coverUrl(item);
+  const url = isUser ? null : D.coverUrl(item);
   if (coverImg) {
     if (url) {
       coverImg.src = url;
@@ -122,11 +213,64 @@ function _renderHeader(item) {
     }
   }
 
+  // Edit/Delete buttons for user items
+  _updateReaderUserControls(item, isUser);
+
   // Collection eyebrow on reader article container
   const article = document.getElementById('lib-article');
   if (article) {
-    article.className = cls;
+    article.className = isUser ? 'lib-user-article' : cls;
   }
+}
+
+function _updateReaderUserControls(item, isUser) {
+  // Remove any existing user controls bar
+  const existing = document.getElementById('lib-reader-user-controls');
+  if (existing) existing.remove();
+
+  if (!isUser) return;
+
+  // Insert Edit + Delete buttons in the reader topbar right side
+  const topbar = document.getElementById('lib-reader-topbar');
+  if (!topbar) return;
+
+  const bar = document.createElement('div');
+  bar.id = 'lib-reader-user-controls';
+  bar.className = 'lib-reader-user-controls';
+  bar.innerHTML =
+    '<button class="lib-reader-user-btn" id="lib-reader-edit-btn" aria-label="Edit post">' +
+      '<svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M11.5 2.5l2 2L6 12H4v-2L11.5 2.5z"/></svg>' +
+      ' Edit' +
+    '</button>' +
+    '<button class="lib-reader-user-btn lib-reader-delete-btn" id="lib-reader-delete-btn" aria-label="Delete post">' +
+      '<svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M3 4h10M5 4V2.5a.5.5 0 01.5-.5h5a.5.5 0 01.5.5V4M6 7v5M10 7v5"/><rect x="2.5" y="4" width="11" height="10" rx="1.5"/></svg>' +
+      ' Delete' +
+    '</button>';
+
+  // Insert before the pager
+  const pager = topbar.querySelector('.lib-reader-pager');
+  topbar.insertBefore(bar, pager);
+
+  // Wire Edit
+  document.getElementById('lib-reader-edit-btn').addEventListener('click', () => {
+    // Find raw user item from LibUser
+    const rawItem = window.LibUser
+      ? window.LibUser.getUserItems().find(i => i.id === item.id)
+      : null;
+    close();
+    window.LibUser && window.LibUser.openComposer(rawItem || item);
+  });
+
+  // Wire Delete
+  document.getElementById('lib-reader-delete-btn').addEventListener('click', async () => {
+    close();
+    if (window.LibUser) {
+      await window.LibUser.deleteItem(item.id);
+      window.LibUser.mergeIntoAllItems();
+      if (window.LibViews) window.LibViews.buildSidebar();
+      if (window.LibApp) window.LibApp.renderAll();
+    }
+  });
 }
 
 /* ===== CLOSE READER ===== */
@@ -137,6 +281,13 @@ function close() {
 
   // Disconnect IntersectionObserver
   if (tocObserver) { tocObserver.disconnect(); tocObserver = null; }
+
+  // Revoke any pending PDF blob URL
+  if (_pdfBlobUrl) { URL.revokeObjectURL(_pdfBlobUrl); _pdfBlobUrl = null; }
+
+  // Remove user controls bar
+  const uc = document.getElementById('lib-reader-user-controls');
+  if (uc) uc.remove();
 
   // Reset hash to grid
   D.pushHash('');

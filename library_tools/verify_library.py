@@ -309,6 +309,124 @@ def run(base_url: str) -> int:
         empty_visible = page.query_selector('#lib-empty.visible')
         if not check('no-results empty state shows for garbage query', empty_visible is not None): failures += 1
 
+        # ══ User-content checks (Library v2) ═════════════════════════════════
+        # The newest item lands in the HERO slot (not the card grid), so user
+        # items are located hero-first. Deletion goes through the reader (the
+        # hero has no hover-delete affordance).
+        page.fill('#lib-search-input', '')
+        page.wait_for_timeout(400)
+
+        def find_user_item(title):
+            hero = page.query_selector('#lib-hero-title')
+            if hero and title in (hero.text_content() or ''):
+                return 'hero'
+            if page.query_selector(f'.lib-card:has-text("{title}")'):
+                return 'card'
+            return None
+
+        def open_item(title):
+            where = find_user_item(title)
+            if where == 'hero':
+                page.click('#lib-hero')
+            elif where == 'card':
+                page.query_selector(f'.lib-card:has-text("{title}")').click()
+            else:
+                return False
+            page.wait_for_timeout(800)
+            return page.evaluate("document.getElementById('lib-reader').classList.contains('open')")
+
+        def reader_delete():
+            page.click('#lib-reader-delete-btn')
+            page.wait_for_timeout(500)
+
+        # ── Check U1: add write-up post → appears (hero or grid) + folder ────
+        page.click('#lib-sb-new-post')
+        page.wait_for_timeout(300)
+        page.fill('#lib-c-title', 'Verify Test Post Alpha')
+        page.fill('#lib-c-folder', 'Verify Folder')
+        page.fill('#lib-c-body', 'Test body with a link https://example.com and more.\n\nSecond paragraph.')
+        page.click('#lib-composer-save')
+        page.wait_for_timeout(700)
+        where = find_user_item('Verify Test Post Alpha')
+        folder_row = page.query_selector('.lib-coll-row:has-text("Verify Folder")')
+        if not check('U1: new write-up appears + sidebar folder',
+                     where is not None and folder_row is not None,
+                     f'where={where} folder={folder_row is not None}'): failures += 1
+
+        # ── Check U2: user item persists across reload (IndexedDB) ───────────
+        page.goto(lib_url, wait_until='domcontentloaded')
+        page.wait_for_selector('.lib-card[data-idx]', timeout=25000)
+        page.wait_for_timeout(600)
+        if not check('U2: user post survives reload (IndexedDB)',
+                     find_user_item('Verify Test Post Alpha') is not None): failures += 1
+
+        # ── Check U3: edit persists ───────────────────────────────────────────
+        if open_item('Verify Test Post Alpha'):
+            page.click('#lib-reader-edit-btn')
+            page.wait_for_timeout(300)
+            page.fill('#lib-c-title', 'Verify Test Post Alpha EDITED')
+            page.click('#lib-composer-save')
+            page.wait_for_timeout(700)
+            page.keyboard.press('Escape')
+            page.wait_for_timeout(400)
+            if not check('U3: edited title persists',
+                         find_user_item('Verify Test Post Alpha EDITED') is not None): failures += 1
+        else:
+            failures += 1
+            print('  [FAIL] U3: edit — could not open user post')
+
+        # ── Check U4: delete + undo restores; delete + expiry removes ────────
+        if open_item('Verify Test Post Alpha EDITED'):
+            reader_delete()
+            gone = find_user_item('Verify Test Post Alpha EDITED') is None
+            page.click('#lib-toast .lib-toast-undo')
+            page.wait_for_timeout(600)
+            restored = find_user_item('Verify Test Post Alpha EDITED') is not None
+            if not check('U4a: delete removes + undo restores', gone and restored,
+                         f'gone={gone} restored={restored}'): failures += 1
+            if open_item('Verify Test Post Alpha EDITED'):
+                reader_delete()
+                page.wait_for_timeout(6800)
+                page.goto(lib_url, wait_until='domcontentloaded')
+                page.wait_for_selector('.lib-card[data-idx]', timeout=25000)
+                page.wait_for_timeout(600)
+                still_gone = find_user_item('Verify Test Post Alpha EDITED') is None
+                if not check('U4b: deleted post stays gone after expiry + reload', still_gone): failures += 1
+            else:
+                failures += 1
+                print('  [FAIL] U4b: could not reopen for final delete')
+        else:
+            failures += 2
+            print('  [FAIL] U4a/U4b: delete/undo — no user post to open')
+
+        # ── Check U5: PDF post via file input renders + opens embed ──────────
+        pdf_path = '/tmp/slate_verify_test.pdf'
+        with open(pdf_path, 'wb') as f:
+            f.write(b'%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n'
+                    b'2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj\n'
+                    b'3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 612 792]>>endobj\n'
+                    b'xref\n0 4\n0000000000 65535 f \n0000000009 00000 n \n'
+                    b'0000000052 00000 n \n0000000101 00000 n \n'
+                    b'trailer<</Size 4/Root 1 0 R>>\nstartxref\n164\n%%EOF\n')
+        page.click('#lib-sb-new-post')
+        page.wait_for_timeout(300)
+        page.fill('#lib-c-title', 'Verify Test PDF')
+        page.set_input_files('#lib-c-pdf', pdf_path)
+        page.wait_for_timeout(300)
+        page.click('#lib-composer-save')
+        page.wait_for_timeout(700)
+        pdf_where = find_user_item('Verify Test PDF')
+        embed_ok = False
+        if pdf_where and open_item('Verify Test PDF'):
+            embed_ok = page.query_selector('#lib-reader object[type="application/pdf"], #lib-reader embed[type="application/pdf"]') is not None
+        if not check('U5: PDF post renders + opens embedded viewer',
+                     pdf_where is not None and embed_ok,
+                     f'where={pdf_where} embed={embed_ok}'): failures += 1
+        # cleanup: delete the test PDF and let undo expire
+        if pdf_where:
+            reader_delete()
+            page.wait_for_timeout(6800)
+
         browser.close()
 
     return failures

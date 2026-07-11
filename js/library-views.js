@@ -12,42 +12,180 @@ let _snippets = new Map();
 
 /* ===== SIDEBAR ===== */
 function buildSidebar() {
-  const counts = D.collectionCounts();
-  const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1]);
+  const sidebar = document.getElementById('lib-sidebar');
+  if (!sidebar) return;
 
-  const container = document.getElementById('lib-sb-colls');
-  if (!container) return;
-  container.innerHTML = '';
+  // Get counts
+  const citriniCounts = D.collectionCounts();
+  const userFolderCounts = D.userFolderCounts ? D.userFolderCounts() : {};
+  const userItems = D._userNormItems || [];
+  const citriniTotal = D.allItems.length;
+  const userTotal = userItems.length;
+  const allTotal = userTotal + citriniTotal;
 
+  // Persist collapsible state
+  let uiPrefs = {};
+  try { uiPrefs = JSON.parse(localStorage.getItem('slate.library.ui.v1') || '{}'); } catch (_) {}
+  const citriniCollapsed = !!uiPrefs.citriniCollapsed;
+
+  // Build sidebar HTML
+  let html = '';
+
+  // ── All Items ──────────────────────────────────────────────────────────
+  html += `
+    <div class="lib-sb-section">
+      <button class="lib-sb-item active" data-filter="all" aria-label="All items, ${allTotal} items">
+        <div class="lib-sb-item-left">
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><rect x="1" y="2" width="6" height="8" rx="1.5"/><rect x="9" y="6" width="6" height="8" rx="1.5"/><path d="M4 12v2M12 2v2"/></svg>
+          All Items
+        </div>
+        <span class="lib-sb-count" id="lib-count-all">${allTotal}</span>
+      </button>
+    </div>`;
+
+  // ── MY LIBRARY ─────────────────────────────────────────────────────────
+  html += `<div class="lib-sb-section" id="lib-sb-my-library">`;
+  html += `<div class="lib-sb-label">My Library</div>`;
+
+  // New post button
+  html += `
+    <button class="lib-sb-item lib-sb-new-post" id="lib-sb-new-post" aria-label="New post">
+      <div class="lib-sb-item-left">
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M8 3v10M3 8h10"/></svg>
+        New post
+      </div>
+    </button>`;
+
+  // User folders
+  const folderEntries = Object.entries(userFolderCounts).filter(([f]) => f);
+  folderEntries.forEach(([folder, count]) => {
+    html += `
+      <button class="lib-coll-row" data-filter="folder:${D.escHtml(folder)}" aria-label="${D.escHtml(folder)}, ${count} items">
+        <span class="lib-coll-row-left">
+          <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M1 4.5h14M2 4.5v9a1 1 0 001 1h10a1 1 0 001-1v-9M6 4.5V3a1 1 0 011-1h2a1 1 0 011 1v1.5"/></svg>
+          ${D.escHtml(folder)}
+        </span>
+        <span class="lib-coll-count">${count}</span>
+      </button>`;
+  });
+
+  // Type rollups (only show if > 0)
+  const writeupCount = userItems.filter(i => i.type === 'writeup').length;
+  const pdfCount = userItems.filter(i => i.type === 'pdf').length;
+
+  if (writeupCount > 0) {
+    html += `
+      <button class="lib-coll-row lib-quiet" data-filter="type:writeup" aria-label="My write-ups, ${writeupCount} items">
+        <span class="lib-coll-row-left">
+          <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M12 2l2 2-9 9H3v-2L12 2z"/><path d="M10 4l2 2"/></svg>
+          My write-ups
+        </span>
+        <span class="lib-coll-count">${writeupCount}</span>
+      </button>`;
+  }
+
+  if (pdfCount > 0) {
+    html += `
+      <button class="lib-coll-row lib-quiet" data-filter="type:pdf" aria-label="PDFs, ${pdfCount} items">
+        <span class="lib-coll-row-left">
+          <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><rect x="2" y="1" width="12" height="14" rx="2"/><path d="M5 5h6M5 8h4"/></svg>
+          PDFs
+        </span>
+        <span class="lib-coll-count">${pdfCount}</span>
+      </button>`;
+  }
+
+  if (userTotal === 0) {
+    html += `<div class="lib-sb-hint">Add your first post with "New post"</div>`;
+  }
+
+  html += `</div>`; // end MY LIBRARY
+
+  // ── CITRINI RESEARCH (collapsible) ─────────────────────────────────────
+  html += `
+    <div class="lib-sb-section" id="lib-sb-citrini">
+      <button class="lib-sb-section-head ${citriniCollapsed ? 'collapsed' : ''}" id="lib-sb-citrini-toggle" aria-expanded="${!citriniCollapsed}" aria-controls="lib-sb-citrini-body">
+        <div class="lib-sb-label-inline">Citrini Research</div>
+        <div style="display:flex;align-items:center;gap:6px">
+          <span class="lib-sb-count" id="lib-count-citrini">${citriniTotal}</span>
+          <svg class="lib-sb-chevron" width="10" height="10" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M2 4l4 4 4-4"/></svg>
+        </div>
+      </button>
+      <div class="lib-sb-citrini-body ${citriniCollapsed ? 'collapsed' : ''}" id="lib-sb-citrini-body">
+        <button class="lib-sb-item lib-sb-citrini-all" data-filter="source:citrini" aria-label="All Citrini, ${citriniTotal} items">
+          <div class="lib-sb-item-left">
+            <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="8" cy="8" r="6.5"/><path d="M8 5.5v5M5.5 8h5"/></svg>
+            All Citrini
+          </div>
+          <span class="lib-sb-count">${citriniTotal}</span>
+        </button>
+        <div class="lib-coll-list">`;
+
+  const sorted = Object.entries(citriniCounts).sort((a, b) => b[1] - a[1]);
   sorted.forEach(([slug, count]) => {
     const meta = D.collMeta(slug);
     const cls = D.collCls(slug);
-    const btn = document.createElement('button');
-    btn.className = 'lib-coll-row ' + cls;
-    btn.setAttribute('data-filter', 'coll:' + slug);
-    btn.setAttribute('aria-label', meta.label + ', ' + count + ' items');
-    btn.innerHTML =
-      '<span class="lib-coll-row-left">' +
-        '<span class="lib-coll-dot"></span>' +
-        D.escHtml(meta.label) +
-      '</span>' +
-      '<span class="lib-coll-count">' + count + '</span>';
+    html += `
+          <button class="lib-coll-row ${cls}" data-filter="coll:${slug}" aria-label="${D.escHtml(meta.label)}, ${count} items">
+            <span class="lib-coll-row-left">
+              <span class="lib-coll-dot"></span>
+              ${D.escHtml(meta.label)}
+            </span>
+            <span class="lib-coll-count">${count}</span>
+          </button>`;
+  });
+
+  html += `
+        </div>
+      </div>
+    </div>`; // end CITRINI RESEARCH
+
+  sidebar.innerHTML = html;
+
+  // Wire: All Items
+  sidebar.querySelector('[data-filter="all"]').addEventListener('click', () => {
+    window.LibApp && window.LibApp.applyFilter('all', 'All Items');
+  });
+
+  // Wire: New post
+  const newPostBtn = document.getElementById('lib-sb-new-post');
+  if (newPostBtn) {
+    newPostBtn.addEventListener('click', () => {
+      window.LibUser && window.LibUser.openComposer(null);
+    });
+  }
+
+  // Wire: filter buttons (folders, type rollups, citrini-all, coll rows)
+  sidebar.querySelectorAll('[data-filter]:not([data-filter="all"])').forEach(btn => {
     btn.addEventListener('click', () => {
-      window.LibApp && window.LibApp.applyFilter('coll:' + slug, meta.label);
+      const f = btn.getAttribute('data-filter');
+      const label = (btn.querySelector('.lib-sb-item-left') || btn.querySelector('.lib-coll-row-left') || btn).textContent.trim().replace(/\s+/g, ' ');
+      window.LibApp && window.LibApp.applyFilter(f, label);
     });
     btn.addEventListener('keydown', e => {
       if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); btn.click(); }
     });
-    container.appendChild(btn);
   });
 
-  // Update all-count
-  const allCount = document.getElementById('lib-count-all');
-  if (allCount) allCount.textContent = D.allItems.length;
+  // Wire: citrini collapsible toggle
+  const toggleBtn = document.getElementById('lib-sb-citrini-toggle');
+  const citriniBody = document.getElementById('lib-sb-citrini-body');
+  if (toggleBtn && citriniBody) {
+    toggleBtn.addEventListener('click', () => {
+      const isCollapsed = citriniBody.classList.toggle('collapsed');
+      toggleBtn.classList.toggle('collapsed', isCollapsed);
+      toggleBtn.setAttribute('aria-expanded', String(!isCollapsed));
+      try {
+        const prefs = JSON.parse(localStorage.getItem('slate.library.ui.v1') || '{}');
+        prefs.citriniCollapsed = isCollapsed;
+        localStorage.setItem('slate.library.ui.v1', JSON.stringify(prefs));
+      } catch (_) {}
+    });
+  }
 }
 
 function syncSidebarActive(filter) {
-  document.querySelectorAll('.lib-sb-item, .lib-coll-row').forEach(el => {
+  document.querySelectorAll('#lib-sidebar [data-filter]').forEach(el => {
     el.classList.toggle('active', el.getAttribute('data-filter') === filter);
   });
 }
@@ -150,76 +288,111 @@ function renderGrid(items, isSearch, offset = 0) {
     html += '</div>';
   });
 
-  // Placeholder type cards (only in non-search all/article view)
-  if (!isSearch && (D.state.filter === 'all' || D.state.filter === 'type:article' || D.state.filter.startsWith('source:'))) {
-    html += placeholderCardsHTML();
-  }
-
   grid.innerHTML = html;
 
   // Wire card clicks via event delegation
   grid.querySelectorAll('.lib-card[data-idx]').forEach(card => {
     const idx = parseInt(card.getAttribute('data-idx'), 10);
-    card.addEventListener('click', () => window.LibReader && window.LibReader.open(idx));
+    card.addEventListener('click', e => {
+      // Don't open reader if delete button was clicked
+      if (e.target.closest('.lib-card-delete')) return;
+      window.LibReader && window.LibReader.open(idx);
+    });
     card.addEventListener('keydown', e => {
       if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); window.LibReader && window.LibReader.open(idx); }
+    });
+  });
+
+  // Wire delete buttons
+  grid.querySelectorAll('.lib-card-delete[data-delete-id]').forEach(btn => {
+    btn.addEventListener('click', async e => {
+      e.stopPropagation();
+      const id = btn.getAttribute('data-delete-id');
+      if (window.LibUser) {
+        await window.LibUser.deleteItem(id);
+        window.LibUser.mergeIntoAllItems();
+        if (window.LibViews) window.LibViews.buildSidebar();
+        if (window.LibApp) window.LibApp.renderAll();
+      }
     });
   });
 }
 
 function cardHTML(item, idx, isSearch) {
+  const isUser = item.source === 'user';
   const meta = D.collMeta(item.collection);
   const cls = D.collCls(item.collection);
   const url = D.coverUrl(item);
   const snip = isSearch && _snippets.has(item.id) ? _snippets.get(item.id) : null;
 
+  // Type badge for user items
+  const typeBadge = isUser
+    ? '<span class="lib-card-user-badge">' + D.escHtml(item.type === 'pdf' ? 'PDF' : 'Write-up') + '</span>'
+    : '';
+
+  // Delete button for user items
+  const deleteBtn = isUser
+    ? '<button class="lib-card-delete" data-delete-id="' + D.escHtml(item.id) + '" aria-label="Delete" title="Delete">' +
+        '<svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 4h10M5 4V2.5a.5.5 0 01.5-.5h5a.5.5 0 01.5.5V4M6 7v5M10 7v5"/><rect x="2.5" y="4" width="11" height="10" rx="1.5"/></svg>' +
+      '</button>'
+    : '';
+
   let coverHTML;
-  if (url) {
+  if (url && !isUser) {
     coverHTML =
       '<div class="lib-card-cover">' +
         '<img src="' + D.escHtml(url) + '" alt="' + D.escHtml(item.title) + '" loading="lazy"' +
           ' onerror="this.style.display=\'none\';this.nextElementSibling.style.display=\'flex\'">' +
         '<div class="lib-card-spine" style="display:none"><span class="lib-spine-bar"></span>' +
           '<span class="lib-spine-text">' + D.escHtml(item.title) + '</span></div>' +
-        (item.locked ? '<div class="lib-card-locked-overlay"><div class="lib-lock-icon">🔒</div></div>' : '') +
+        (item.locked ? '<div class="lib-card-locked-overlay"><div class="lib-lock-icon">&#x1F512;</div></div>' : '') +
         '<span class="lib-card-chip">' + D.escHtml(meta.label) + '</span>' +
       '</div>';
   } else {
-    // Typographic spine tile (archive-gallery graft)
+    // Typographic spine tile (user items always use this)
+    const userClass = isUser ? ' lib-card-cover-user lib-card-cover-user-' + (item.type || 'writeup') : '';
     coverHTML =
-      '<div class="lib-card-cover">' +
+      '<div class="lib-card-cover' + userClass + '">' +
         '<div class="lib-card-spine">' +
           '<span class="lib-spine-bar"></span>' +
           '<span class="lib-spine-text">' + D.escHtml(item.title) + '</span>' +
         '</div>' +
-        (item.locked ? '<div class="lib-card-locked-overlay"><div class="lib-lock-icon">🔒</div></div>' : '') +
-        '<span class="lib-card-chip">' + D.escHtml(meta.label) + '</span>' +
+        (item.locked ? '<div class="lib-card-locked-overlay"><div class="lib-lock-icon">&#x1F512;</div></div>' : '') +
+        '<span class="lib-card-chip">' + D.escHtml(isUser ? (item.type === 'pdf' ? 'PDF' : 'Write-up') : meta.label) + '</span>' +
       '</div>';
   }
 
   const snippetHTML = snip
-    ? '<div class="lib-snippet">…' + D.escHtml(snip).replace(
+    ? '<div class="lib-snippet">&#8230;' + D.escHtml(snip).replace(
         new RegExp(D.escHtml(D.state.search).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi'),
         m => '<mark>' + m + '</mark>'
-      ) + '…</div>'
+      ) + '&#8230;</div>'
+    : '';
+
+  const folderBadge = isUser && item.folder
+    ? '<span class="lib-card-folder">' + D.escHtml(item.folder) + '</span>'
     : '';
 
   return (
-    '<div class="lib-card ' + cls + '" role="button" tabindex="0"' +
+    '<div class="lib-card ' + (isUser ? 'lib-card-user' : '') + ' ' + cls + '" role="button" tabindex="0"' +
       ' data-idx="' + idx + '" data-slug="' + D.escHtml(item.id) + '"' +
+      (isUser ? ' data-user-item="1"' : '') +
       ' aria-label="' + D.escHtml(item.title) + '">' +
       coverHTML +
       '<div class="lib-card-body">' +
-        '<div class="lib-card-coll">' + D.escHtml(meta.label) + '</div>' +
+        '<div class="lib-card-coll">' + D.escHtml(isUser && item.folder ? item.folder : meta.label) + '</div>' +
         '<div class="lib-card-title">' + D.escHtml(item.title) + '</div>' +
         '<div class="lib-card-subtitle">' + D.escHtml(item.subtitle || '') + '</div>' +
         snippetHTML +
         '<div class="lib-card-meta">' +
           '<span class="lib-card-date">' + D.fmtDate(item.date) + '</span>' +
           '<span class="lib-card-reading">' +
-            '<svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="8" cy="8" r="6.5"/><path d="M8 5v3.5l2 1.5"/></svg>' +
-            D.escHtml(D.fmtReading(item.reading_min)) +
+            (item.reading_min
+              ? '<svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="8" cy="8" r="6.5"/><path d="M8 5v3.5l2 1.5"/></svg>' +
+                D.escHtml(D.fmtReading(item.reading_min))
+              : '') +
           '</span>' +
+          deleteBtn +
         '</div>' +
       '</div>' +
     '</div>'
@@ -426,6 +599,11 @@ function updateSortBtn(sort) {
 
 /* ===== TOAST ===== */
 function showToast(msg, ms) {
+  // Delegate to LibUser's toast if available (it handles the undo button layout)
+  if (window.LibUser && window.LibUser.showLibToast) {
+    window.LibUser.showLibToast(msg, ms);
+    return;
+  }
   const t = document.getElementById('lib-toast');
   if (!t) return;
   t.textContent = msg;
