@@ -786,6 +786,383 @@ with sync_playwright() as pw:
           lib_export_shape.get("filesIsObj", False), str(lib_export_shape))
     ctx9.close()
 
+    # --- WAVE 2a ACCEPTANCE CHECKS ---
+
+    # FG-03 / security: script tag in md renders as inert escaped text, not executed
+    ctx_md = browser.new_context(viewport={"width": 1440, "height": 900})
+    p_md = ctx_md.new_page()
+    p_md.goto(BASE)
+    p_md.wait_for_timeout(500)
+    # Navigate to brain, create a note with an XSS payload, switch to preview
+    p_md.locator("#viewSeg .seg-btn[data-view='brain']").click()
+    p_md.wait_for_timeout(400)
+    # Seed a note with <script> in text into the first available shelf
+    p_md.evaluate(
+        "() => { const cat = state.brain.categories[0];"
+        " if (cat) { cat.notes.push({id:'xss-test',title:'XSS Test',"
+        "  text:'**bold** <scr'+'ipt>window._xssExecuted=true;</scr'+'ipt> hello',"
+        "  created:Date.now()}); save(); } }")
+    # Click the first shelf row
+    p_md.locator(".bi-cat-row").first.click()
+    p_md.wait_for_timeout(300)
+    p_md.locator(".bc-note-entry", has_text="XSS Test").click()
+    p_md.wait_for_timeout(300)
+    # Switch to preview via the mode button in the toolbar
+    p_md.locator("#beModeBtn").click()
+    p_md.wait_for_timeout(400)
+    xss_ran = p_md.evaluate("() => !!window._xssExecuted")
+    preview_count = p_md.locator(".be-preview").count()
+    preview_html = p_md.locator(".be-preview").inner_html() if preview_count > 0 else ""
+    check("w2a-FG03: md render — script tag not executed", not xss_ran,
+          f"xssExecuted={xss_ran}")
+    check("w2a-FG03: md render — preview renders (be-preview present)", preview_count == 1,
+          f"preview_count={preview_count}")
+    check("w2a-FG03: md render — bold rendered as <strong>",
+          "<strong>" in preview_html, preview_html[:200])
+    # script text should appear as escaped text, not as a <script> element
+    has_live_script = p_md.locator(".be-preview script").count() > 0
+    check("w2a-FG03: md render — no live script element in preview", not has_live_script)
+    ctx_md.close()
+
+    # FG-09: Pin — pinned notes float to top; pin badge visible
+    ctx_pin = browser.new_context(viewport={"width": 1440, "height": 900})
+    p_pin = ctx_pin.new_page()
+    p_pin.goto(BASE)
+    p_pin.wait_for_timeout(400)
+    p_pin.locator("#viewSeg .seg-btn[data-view='brain']").click()
+    p_pin.wait_for_timeout(300)
+    # Seed two notes: note A (unpinned, older) and note B (pinned, newer)
+    p_pin.evaluate(
+        "() => { const cat = state.brain.categories[0];"
+        " cat.notes.push({id:'pin-z',title:'AAA Unpinned',text:'aaa',created:Date.now()-2000});"
+        " cat.notes.push({id:'pin-a',title:'ZZZ Pinned',text:'zzz',pinned:true,created:Date.now()-1000});"
+        " save(); }")
+    p_pin.locator(".bi-cat-row").first.click()
+    p_pin.wait_for_timeout(300)
+    titles = p_pin.locator(".bc-note-title").all_text_contents()
+    pinned_idx = next((i for i, t in enumerate(titles) if "ZZZ Pinned" in t), -1)
+    unpinned_idx = next((i for i, t in enumerate(titles) if "AAA Unpinned" in t), -1)
+    check("w2a-FG09: pinned note floats above unpinned",
+          0 <= pinned_idx < unpinned_idx,
+          f"pinned_idx={pinned_idx} unpinned_idx={unpinned_idx} titles={titles[:6]}")
+    ctx_pin.close()
+
+    # FG-10: Trash — soft delete; restore returns note to original shelf
+    ctx_tr = browser.new_context(viewport={"width": 1440, "height": 900})
+    p_tr = ctx_tr.new_page()
+    p_tr.goto(BASE)
+    p_tr.wait_for_timeout(400)
+    p_tr.locator("#viewSeg .seg-btn[data-view='brain']").click()
+    p_tr.wait_for_timeout(300)
+    # Navigate to first shelf, click first note, delete it (soft delete → trash)
+    p_tr.locator(".bi-cat-row").first.click()
+    p_tr.wait_for_timeout(300)
+    count_before = p_tr.locator(".bc-note-entry").count()
+    p_tr.locator(".bc-note-entry").first.click()
+    p_tr.wait_for_timeout(250)
+    p_tr.locator(".be-tool-danger").click()
+    p_tr.wait_for_timeout(400)
+    count_after = p_tr.locator(".bc-note-entry").count()
+    check("w2a-FG10: note count decreases after delete", count_after < count_before,
+          f"{count_before} -> {count_after}")
+    # Check trash array in state has the note
+    trash_len = p_tr.evaluate("() => (state.brain.trash || []).length")
+    check("w2a-FG10: deleted note is in state.brain.trash", trash_len >= 1, str(trash_len))
+    # Navigate to trash view via palette or index "Trash" row
+    p_tr.keyboard.press("Escape")
+    p_tr.wait_for_timeout(200)
+    trash_row = p_tr.locator(".bi-trash-row")
+    check("w2a-FG10: trash row visible in brain index", trash_row.count() == 1)
+    trash_row.click()
+    p_tr.wait_for_timeout(300)
+    trash_entries = p_tr.locator(".bc-trash-entry").count()
+    check("w2a-FG10: trash view shows deleted note", trash_entries >= 1, str(trash_entries))
+    # Restore the first entry (click "Restore" button in first trash entry)
+    p_tr.locator(".bc-trash-entry .bc-action-btn", has_text="Restore").first.click()
+    p_tr.wait_for_timeout(300)
+    trash_after_restore = p_tr.evaluate("() => (state.brain.trash || []).length")
+    check("w2a-FG10: restore removes note from trash", trash_after_restore < trash_len,
+          str(trash_after_restore))
+    ctx_tr.close()
+
+    # FG-06: Today's journal — palette action creates/finds Journal shelf + today's date note
+    import datetime as _dt
+    today_iso = _dt.date.today().isoformat()
+    ctx_jn = browser.new_context(viewport={"width": 1440, "height": 900})
+    p_jn = ctx_jn.new_page()
+    p_jn.goto(BASE)
+    p_jn.wait_for_timeout(400)
+    p_jn.keyboard.press("Control+k")
+    p_jn.wait_for_timeout(200)
+    p_jn.locator(".palette-input").fill("journal")
+    p_jn.wait_for_timeout(200)
+    journal_row = p_jn.locator(".palette-row", has_text="Today's journal")
+    check("w2a-FG06: Today's journal palette action present", journal_row.count() >= 1)
+    if journal_row.count() >= 1:
+        journal_row.first.click()
+        p_jn.wait_for_timeout(400)
+        # Should land in editor for a note titled today's date
+        in_editor = p_jn.locator(".be-body").count() == 1
+        check("w2a-FG06: journal action opens editor", in_editor)
+        # Title input should contain today's ISO date
+        title_val = p_jn.locator(".be-title").input_value() if p_jn.locator(".be-title").count() else ""
+        check("w2a-FG06: journal note title is today's date", today_iso in title_val,
+              f"title={title_val!r} today={today_iso}")
+        # Journal shelf must exist in state
+        journal_in_state = p_jn.evaluate(
+            "() => !!state.brain.categories.find(c => c.name === 'Journal')")
+        check("w2a-FG06: Journal shelf created in state", journal_in_state)
+    ctx_jn.close()
+
+    # FG-07: '?' key opens keyboard shortcuts overlay
+    ctx_ks = browser.new_context(viewport={"width": 1440, "height": 900})
+    p_ks = ctx_ks.new_page()
+    p_ks.goto(BASE)
+    p_ks.wait_for_timeout(400)
+    p_ks.locator("#viewSeg .seg-btn[data-view='brain']").click()
+    p_ks.wait_for_timeout(300)
+    p_ks.keyboard.press("?")
+    p_ks.wait_for_timeout(300)
+    overlay_visible = p_ks.locator(".shortcuts-panel").count() >= 1
+    check("w2a-FG07: ? key opens shortcuts overlay", overlay_visible)
+    if overlay_visible:
+        p_ks.locator(".shortcuts-close").click()
+        p_ks.wait_for_timeout(200)
+        check("w2a-FG07: close button hides overlay",
+              p_ks.locator(".shortcuts-panel").count() == 0)
+    ctx_ks.close()
+
+    # UX-05/UX-12: untitled notes — snippet shows second line, not repeating first-line title
+    ctx_ut = browser.new_context(viewport={"width": 1440, "height": 900})
+    p_ut = ctx_ut.new_page()
+    p_ut.goto(BASE)
+    p_ut.wait_for_timeout(400)
+    p_ut.locator("#viewSeg .seg-btn[data-view='brain']").click()
+    p_ut.wait_for_timeout(300)
+    # Seed an untitled note (no title field) with two lines: first line becomes title, second is snippet
+    p_ut.evaluate(
+        "() => { const cat = state.brain.categories[0];"
+        " cat.notes.push({id:'ux05-test',text:'UX05 First Line\\nUX05 second line snippet',created:Date.now()}); save(); }")
+    p_ut.locator(".bi-cat-row").first.click()
+    p_ut.wait_for_timeout(300)
+    # First line is used as title
+    title_el = p_ut.locator(".bc-note-entry[data-note-id='ux05-test'] .bc-note-title")
+    title_text = title_el.text_content() if title_el.count() else ""
+    check("w2a-UX05: first line used as title for untitled note", "UX05 First Line" in title_text,
+          f"title={title_text!r}")
+    # Snippet shows second line (not repeating first)
+    snippet_el = p_ut.locator(".bc-note-entry[data-note-id='ux05-test'] .bc-note-snippet")
+    snippet_text = snippet_el.text_content() if snippet_el.count() else ""
+    check("w2a-UX05: snippet shows second line not first-line repeat",
+          "UX05 second line snippet" in snippet_text and "UX05 First Line" not in snippet_text,
+          f"snippet={snippet_text!r}")
+    ctx_ut.close()
+
+    # INBOX CONTRACT: seeding slate.brain.inbox.v1 on load drains to Clippings shelf
+    ctx_ib = browser.new_context(viewport={"width": 1440, "height": 900})
+    ctx_ib.add_init_script(
+        "localStorage.setItem('slate.brain.inbox.v1', "
+        "JSON.stringify([{text:'Inbox test clip',sourceTitle:'Test Source',sourceUrl:'https://example.com',ts:" + str(int(__import__('time').time() * 1000)) + "}]))")
+    p_ib = ctx_ib.new_page()
+    ib_errs = []
+    p_ib.on("pageerror", lambda e: ib_errs.append(str(e)))
+    p_ib.goto(BASE)
+    p_ib.wait_for_timeout(700)
+    # inbox key should be cleared
+    inbox_key_after = p_ib.evaluate("localStorage.getItem('slate.brain.inbox.v1')")
+    check("w2a-INBOX: inbox key cleared after drain", inbox_key_after is None, str(inbox_key_after))
+    # Clippings shelf should exist in state
+    clippings_exists = p_ib.evaluate(
+        "() => !!state.brain.categories.find(c => c.name === 'Clippings')")
+    check("w2a-INBOX: Clippings shelf created in state", clippings_exists)
+    # Navigate brain to verify note appears
+    p_ib.locator("#viewSeg .seg-btn[data-view='brain']").click()
+    p_ib.wait_for_timeout(300)
+    clippings_row = p_ib.locator(".bi-cat-row", has_text="Clippings")
+    check("w2a-INBOX: Clippings shelf row visible in brain index", clippings_row.count() >= 1)
+    if clippings_row.count() >= 1:
+        clippings_row.click()
+        p_ib.wait_for_timeout(300)
+        clip_note = p_ib.locator(".bc-note-entry", has_text="Inbox test clip")
+        check("w2a-INBOX: clipped note appears in Clippings shelf", clip_note.count() >= 1,
+              str(p_ib.locator(".bc-note-entry").all_text_contents()[:3]))
+    check("w2a-INBOX: no JS errors during inbox drain", not ib_errs, "; ".join(ib_errs[:3]))
+    ctx_ib.close()
+
+    # FG-17: Palette "Add card to <board>" entries exist (one per board)
+    ctx_ac = browser.new_context(viewport={"width": 1440, "height": 900})
+    p_ac = ctx_ac.new_page()
+    p_ac.goto(BASE)
+    p_ac.wait_for_timeout(400)
+    p_ac.keyboard.press("Control+k")
+    p_ac.wait_for_timeout(200)
+    p_ac.locator(".palette-input").fill("Add card")
+    p_ac.wait_for_timeout(300)
+    add_card_rows = p_ac.locator(".palette-row", has_text="Add card to").count()
+    check("w2a-FG17: 'Add card to' entries in palette", add_card_rows >= 1, str(add_card_rows))
+    p_ac.keyboard.press("Escape")
+    ctx_ac.close()
+
+    # UX-07: Palette has "Open Library" action
+    ctx_ol = browser.new_context(viewport={"width": 1440, "height": 900})
+    p_ol = ctx_ol.new_page()
+    p_ol.goto(BASE)
+    p_ol.wait_for_timeout(400)
+    p_ol.keyboard.press("Control+k")
+    p_ol.wait_for_timeout(200)
+    p_ol.locator(".palette-input").fill("library")
+    p_ol.wait_for_timeout(200)
+    lib_row = p_ol.locator(".palette-row", has_text="Open Library")
+    check("w2a-UX07: 'Open Library' palette action present", lib_row.count() >= 1)
+    p_ol.keyboard.press("Escape")
+    ctx_ol.close()
+
+    # ── FINDING 1: printNote XSS — title with <img onerror> must not execute in print window ──
+    # Test (a): stub window.open to capture written HTML; assert payload is escaped
+    ctx_pn = browser.new_context(viewport={"width": 1440, "height": 900})
+    p_pn = ctx_pn.new_page()
+    p_pn.goto(BASE)
+    p_pn.wait_for_timeout(400)
+    p_pn.locator("#viewSeg .seg-btn[data-view='brain']").click()
+    p_pn.wait_for_timeout(300)
+    # Seed a note whose title is an XSS payload; also seed a body XSS line
+    p_pn.evaluate(
+        "() => { const cat = state.brain.categories[0];"
+        " cat.notes.push({id:'pn-xss',title:'<img src=x onerror=parent.__PF__=true>',"
+        "  text:'safe line\\n<img src=x onerror=parent.__PF2__=true>',created:Date.now()});"
+        " save(); }")
+    # Navigate into the shelf and open the note
+    p_pn.locator(".bi-cat-row").first.click()
+    p_pn.wait_for_timeout(300)
+    p_pn.locator(".bc-note-entry[data-note-id='pn-xss']").click()
+    p_pn.wait_for_timeout(300)
+    # Stub window.open to return a fake document that captures written HTML
+    captured_html = p_pn.evaluate("""() => {
+        let written = '';
+        const fakeDoc = {
+            write: (s) => { written += s; },
+            close: () => {},
+        };
+        const fakeWin = { document: fakeDoc, focus: () => {}, print: () => {} };
+        const orig = window.open;
+        window.open = () => fakeWin;
+        // Find the note and call printNote
+        let found = null;
+        for (const cat of state.brain.categories)
+            for (const n of cat.notes) if (n.id === 'pn-xss') { found = n; break; }
+        if (!found) return 'NOTE_NOT_FOUND';
+        printNote(found);
+        window.open = orig;
+        return written;
+    }""")
+    # The raw payload must not appear unescaped; &lt; must appear instead of <
+    pn_has_raw_tag = '<img src=x onerror=' in captured_html
+    pn_has_escaped = '&lt;img' in captured_html
+    check("finding1: printNote title — raw <img> tag absent in print HTML", not pn_has_raw_tag,
+          captured_html[:300] if pn_has_raw_tag else "")
+    check("finding1: printNote title — payload is HTML-escaped", pn_has_escaped,
+          captured_html[:300])
+    # Canary: the onerror must not have fired
+    canary_fired = p_pn.evaluate("() => !!window.__PF__")
+    check("finding1: printNote XSS canary did not fire", not canary_fired,
+          f"__PF__={canary_fired}")
+    ctx_pn.close()
+
+    # Test (b): inbox-clip → Clippings note → print is also safe
+    ctx_pn2 = browser.new_context(viewport={"width": 1440, "height": 900})
+    ctx_pn2.add_init_script(
+        "localStorage.setItem('slate.brain.inbox.v1', "
+        "JSON.stringify([{text:'<img src=x onerror=window.__PF3__=true> clip payload',"
+        "sourceTitle:'Test',sourceUrl:'https://x.com',ts:Date.now()}]))")
+    p_pn2 = ctx_pn2.new_page()
+    p_pn2.goto(BASE)
+    p_pn2.wait_for_timeout(700)
+    clip_print_html = p_pn2.evaluate("""() => {
+        let written = '';
+        const fakeDoc = { write: (s) => { written += s; }, close: () => {} };
+        const fakeWin = { document: fakeDoc, focus: () => {}, print: () => {} };
+        const orig = window.open;
+        window.open = () => fakeWin;
+        // Find the Clippings note
+        const cat = state.brain.categories.find(c => c.name === 'Clippings');
+        if (!cat || !cat.notes.length) return 'NO_CLIP';
+        printNote(cat.notes[0]);
+        window.open = orig;
+        return written;
+    }""")
+    clip_has_raw = '<img src=x onerror=' in (clip_print_html or '')
+    check("finding1: inbox-clip printNote — raw <img> tag absent", not clip_has_raw,
+          (clip_print_html or '')[:200] if clip_has_raw else "")
+    ctx_pn2.close()
+
+    # ── FINDING 2: trash purge must persist to localStorage ──
+    ctx_tp = browser.new_context(viewport={"width": 1440, "height": 900})
+    # Pre-seed state with a trash entry whose deletedAt is 31 days ago
+    import json as _json
+    ms_31d_ago = int(__import__('time').time() * 1000) - 31 * 24 * 60 * 60 * 1000
+    seed_state = {
+        "v": 1, "theme": "light", "view": "brain", "activeWs": "w1",
+        "ws": [{"id": "w1", "name": "Personal", "scroll": {"x": 0, "y": 0}, "boards": []}],
+        "brain": {
+            "categories": [{"id": "c1", "name": "Test", "notes": []}],
+            "trash": [{"note": {"id": "stale-n", "text": "SECRET_BODY", "created": ms_31d_ago},
+                       "catName": "Test", "catId": "c1", "deletedAt": ms_31d_ago}]
+        }
+    }
+    ctx_tp.add_init_script(
+        "localStorage.setItem('slate.state.v1', " + _json.dumps(_json.dumps(seed_state)) + ")")
+    p_tp = ctx_tp.new_page()
+    p_tp.goto(BASE)
+    # purgeExpiredTrash fires on setTimeout(0) then saveNow persists — poll for
+    # the outcome rather than a fixed sleep (the fixed 800ms was flaky under
+    # parallel-server load and would cause intermittent CI reds in wave 3).
+    try:
+        p_tp.wait_for_function("() => (state.brain.trash || []).length === 0", timeout=6000)
+    except Exception:
+        pass
+    # The trash entry should be gone from state
+    trash_count = p_tp.evaluate("() => (state.brain.trash || []).length")
+    check("finding2: purgeExpiredTrash removes entry from in-memory state", trash_count == 0,
+          f"trash count={trash_count}")
+    # Crucially, it must also be gone from localStorage — reload and check
+    ls_raw = p_tp.evaluate("() => localStorage.getItem('slate.state.v1')")
+    ls_body_present = 'SECRET_BODY' in (ls_raw or '')
+    check("finding2: purge persisted — purged note body absent from localStorage",
+          not ls_body_present, (ls_raw or '')[:300] if ls_body_present else "")
+    ctx_tp.close()
+
+    # ── FINDING 3: wikilink autocomplete to long-first-line note resolves (non-dangling) ──
+    ctx_wl = browser.new_context(viewport={"width": 1440, "height": 900})
+    p_wl = ctx_wl.new_page()
+    p_wl.goto(BASE)
+    p_wl.wait_for_timeout(400)
+    p_wl.locator("#viewSeg .seg-btn[data-view='brain']").click()
+    p_wl.wait_for_timeout(300)
+    # Seed a note with no explicit title and a first line > 80 chars
+    long_first_line = "A" * 85  # 85 chars — exceeds the 80-char threshold
+    p_wl.evaluate(
+        "() => { const cat = state.brain.categories[0];"
+        " cat.notes.push({id:'wl-long',text:'" + long_first_line + "\\nSecond line content',"
+        "  created:Date.now()}); save(); }")
+    # noteTitle() for this note returns slice(0,80) + '…' (85 chars → truncated)
+    expected_truncated = long_first_line[:80] + '…'
+    expected_match_key = long_first_line[:80]  # resolver matches against slice-80 without ellipsis
+    # Verify resolver strips trailing '…' and finds the note
+    resolved = p_wl.evaluate(
+        "() => { const resolver = buildNoteLinkResolver();"
+        " return resolver('" + expected_truncated + "'); }")
+    check("finding3: wikilink resolver strips trailing ellipsis and resolves long-title note",
+          resolved is not None and resolved.startswith('#brain-note-'),
+          f"resolved={resolved!r}")
+    # Also verify that the plain slice-80 (no ellipsis) still resolves (regression guard)
+    resolved_plain = p_wl.evaluate(
+        "() => { const resolver = buildNoteLinkResolver();"
+        " return resolver('" + expected_match_key + "'); }")
+    check("finding3: wikilink resolver also resolves slice-80 key without ellipsis",
+          resolved_plain is not None and resolved_plain.startswith('#brain-note-'),
+          f"resolved_plain={resolved_plain!r}")
+    ctx_wl.close()
+
     browser.close()
 
 fails = [r for r in results if not r[1]]

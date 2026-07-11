@@ -692,6 +692,247 @@ body[data-view="brain"] .fab { display: flex; }
 ───────────────────────────────────── */
 .pop-move { min-width: 180px; }
 
+/* ─── TOOLBAR LEFT/RIGHT (wave 2a: left side gets mode + pin) ─── */
+.be-toolbar-left {
+  display: flex; align-items: center; gap: 6px;
+}
+.be-mode-btn { font-size: 12px; }
+.be-pin-active {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+.be-pin-active:hover { background: var(--accent-soft); color: var(--accent); opacity: 0.9; }
+
+/* ─── PREVIEW MODE (FG-03) ─── */
+.be-preview {
+  max-width: 660px;
+  margin: 0 auto;
+  padding: 0 32px 40px;
+  cursor: text; /* hint: click to edit */
+}
+.be-preview-empty {
+  color: var(--ink-3);
+  font-size: 14px;
+  font-style: italic;
+  padding: 20px 0;
+}
+/* Markdown rendered elements */
+.be-preview .md-h1,
+.be-preview .md-h2,
+.be-preview .md-h3 { margin: 1.3em 0 0.4em; font-weight: 700; color: var(--ink); }
+.be-preview .md-h1 { font-size: 20px; }
+.be-preview .md-h2 { font-size: 17px; }
+.be-preview .md-h3 { font-size: 15px; }
+.be-preview .md-p { margin: 0.85em 0; font-size: 15.5px; line-height: 1.8; color: var(--ink); }
+.be-preview .md-ul,
+.be-preview .md-ol { padding-left: 22px; margin: 0.7em 0; }
+.be-preview .md-ul li,
+.be-preview .md-ol li { margin: 0.3em 0; font-size: 15px; line-height: 1.7; color: var(--ink); }
+.be-preview .md-blockquote {
+  border-left: 3px solid var(--accent);
+  margin: 0.8em 0; padding: 6px 14px;
+  color: var(--ink-2);
+  font-size: 15px;
+  background: var(--accent-soft);
+  border-radius: 0 6px 6px 0;
+}
+.be-preview .md-code-block {
+  background: var(--hover);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 12px 14px;
+  margin: 0.8em 0;
+  overflow-x: auto;
+  font-family: var(--mono);
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--ink);
+}
+.be-preview .md-code-inline {
+  background: var(--hover);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 1px 5px;
+  font-family: var(--mono);
+  font-size: 13px;
+  color: var(--ink);
+}
+.be-preview .md-link,
+.be-preview a { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; }
+.be-preview .md-link:hover { opacity: 0.8; }
+.be-preview .md-wikilink {
+  color: var(--accent);
+  background: var(--accent-soft);
+  padding: 1px 6px;
+  border-radius: 4px;
+  text-decoration: none;
+  font-weight: 500;
+  cursor: pointer;
+}
+.be-preview .md-wikilink:hover { opacity: 0.85; }
+.be-preview .md-wikilink-dead {
+  color: var(--ink-3);
+  background: var(--hover);
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-style: italic;
+  cursor: default;
+}
+
+/* ─── BACKLINKS (FG-04) ─── */
+.be-backlinks {
+  max-width: 660px;
+  margin: 16px auto 0;
+  padding: 14px 32px;
+  border-top: 1px solid var(--line);
+}
+.be-backlinks-label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  margin-bottom: 8px;
+}
+.be-backlink-item {
+  display: inline-block;
+  margin: 3px 5px 3px 0;
+  padding: 3px 10px;
+  border-radius: 6px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 12.5px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: opacity 120ms;
+}
+.be-backlink-item:hover { opacity: 0.8; }
+
+/* ─── PIN BUTTON on note rows ─── */
+.bc-pin-btn {
+  flex-shrink: 0;
+  width: 22px; height: 22px;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 5px;
+  font-size: 12px;
+  opacity: 0;
+  transition: opacity 120ms, background 100ms;
+  margin-right: 2px;
+}
+.bc-note-entry:hover .bc-pin-btn,
+.bc-pin-btn.bc-pin-active { opacity: 1; }
+.bc-pin-btn:hover { background: var(--hover); }
+.bc-pin-btn.bc-pin-active { color: var(--accent); }
+
+.bc-note-pinned { background: var(--accent-soft) !important; }
+.bc-note-pinned:hover { background: color-mix(in srgb, var(--accent-soft) 80%, var(--hover)) !important; }
+.bc-note-pin-glyph { font-size: 11px; opacity: 0.7; }
+
+/* ─── PINNED BADGE on category rows ─── */
+.bi-cat-latest-untitled { font-style: italic; color: var(--ink-3); }
+.bi-cat-pinned-badge {
+  font-size: 10.5px;
+  color: var(--ink-3);
+  background: var(--hover);
+  padding: 2px 6px;
+  border-radius: 99px;
+}
+.bi-pin-glyph { font-size: 10px; margin-left: 4px; opacity: 0.7; }
+
+/* ─── TRASH ROW ─── */
+.bi-trash-row { border-color: rgba(209,77,77,0.25); }
+
+/* ─── TRASH VIEW ─── */
+.bc-trash-entry { cursor: default !important; }
+.bc-trash-actions {
+  display: flex; align-items: center; gap: 8px;
+  margin-top: 8px;
+  flex-wrap: wrap;
+}
+
+/* ─── WIKILINK AUTOCOMPLETE ─── */
+.wikilink-autocomplete {
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-radius: 10px;
+  box-shadow: var(--shadow-pop);
+  min-width: 220px;
+  max-width: 340px;
+  overflow: hidden;
+  animation: sheet-in 120ms ease;
+}
+.wikilink-ac-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 8px 14px;
+  font-size: 13.5px;
+  color: var(--ink);
+  transition: background 80ms;
+}
+.wikilink-ac-item:hover { background: var(--hover); }
+
+/* ─── SHORTCUTS OVERLAY (FG-07) ─── */
+.shortcuts-backdrop {
+  position: fixed; inset: 0; z-index: 400;
+  background: rgba(9,11,16,0.5);
+  backdrop-filter: blur(3px);
+  -webkit-backdrop-filter: blur(3px);
+  display: flex; align-items: center; justify-content: center;
+  opacity: 0; transition: opacity 180ms;
+}
+.shortcuts-backdrop.show { opacity: 1; }
+.shortcuts-panel {
+  width: 540px;
+  max-width: calc(100vw - 32px);
+  max-height: calc(100vh - 80px);
+  overflow-y: auto;
+  background: var(--surface);
+  border-radius: 18px;
+  box-shadow: var(--shadow-pop);
+  border: 1px solid var(--line-strong);
+}
+.shortcuts-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 18px 22px 14px;
+  border-bottom: 1px solid var(--line);
+  position: sticky; top: 0;
+  background: var(--surface);
+  border-radius: 18px 18px 0 0;
+}
+.shortcuts-title { font-size: 15px; font-weight: 700; color: var(--ink); letter-spacing: -0.01em; }
+.shortcuts-close {
+  padding: 5px; border-radius: 6px; color: var(--ink-3);
+  transition: background 100ms, color 100ms;
+}
+.shortcuts-close:hover { background: var(--hover); color: var(--ink); }
+.shortcuts-section {
+  padding: 14px 22px;
+  border-bottom: 1px solid var(--line);
+}
+.shortcuts-section:last-child { border-bottom: none; }
+.shortcuts-group-title {
+  font-size: 11px; font-weight: 700;
+  letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--ink-3);
+  margin-bottom: 10px;
+}
+.shortcuts-table { display: flex; flex-direction: column; gap: 6px; }
+.shortcuts-row { display: flex; align-items: center; gap: 14px; }
+.shortcuts-key-wrap { min-width: 150px; flex-shrink: 0; }
+.shortcuts-kbd {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 5px;
+  background: var(--hover);
+  border: 1px solid var(--line-strong);
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+.shortcuts-desc { font-size: 13px; color: var(--ink-2); }
+
 /* ─────────────────────────────────────
    RESPONSIVE
 ───────────────────────────────────── */

@@ -9,14 +9,18 @@ const PALETTE_ICONS = {
   card: 'M5.5 8.4l1.8 1.8 3.4-3.9M14 8A6 6 0 1 1 2 8a6 6 0 0 1 12 0z',
   topic: 'M2.5 7.5l6-5.4 5 .4.4 5-6 5.4a1.2 1.2 0 0 1-1.7 0l-3.7-3.7a1.2 1.2 0 0 1 0-1.7zM10.5 5.5h.01',
   note: 'M3 5h10M3 8h10M3 11h6',
+  article: 'M3 3h10M3 6.5h10M3 10h7M3 13h4',
+  addcard: 'M8 3v10M3 8h10',
 };
 const PALETTE_GROUPS = [
   ['action', 'Actions'],
   ['ws', 'Workspaces'],
   ['board', 'Boards'],
+  ['addcard', 'Add card to…'],
   ['card', 'Cards'],
   ['topic', 'Topics'],
   ['note', 'Notes'],
+  ['article', 'Library'],
 ];
 
 let paletteTeardown = null;
@@ -129,6 +133,33 @@ function paletteIndex() {
   } });
   out.push({ type: 'action', label: 'Export backup', hint: 'Data', run: () => exportBackup() });
   out.push({ type: 'action', label: 'Export Brain as Markdown', hint: 'Data', run: () => exportBrainMarkdown() });
+  // FG-06: Today's journal
+  out.push({ type: 'action', label: "Today's journal", hint: 'Brain', run: () => {
+    closeAnyModal();
+    state.view = 'brain';
+    save();
+    renderAll();
+    if (typeof openTodaysJournal === 'function') openTodaysJournal();
+  }});
+  // FG-07: keyboard shortcuts overlay
+  out.push({ type: 'action', label: 'Keyboard shortcuts', hint: 'Help', run: () => {
+    if (typeof openShortcutsOverlay === 'function') openShortcutsOverlay();
+  }});
+  // FG-10: Brain Trash
+  out.push({ type: 'action', label: 'Brain Trash', hint: 'Brain', run: () => {
+    closeAnyModal();
+    state.view = 'brain';
+    save();
+    renderAll();
+    if (typeof navToTrash === 'function') navToTrash();
+  }});
+  // UX-07: Open Library
+  out.push({ type: 'action', label: 'Open Library', hint: 'View', run: () => {
+    window.location.href = 'library.html';
+  }});
+
+  // FG-05: Library search (fetch manifest cached 5min)
+  _appendLibraryItems(out);
 
   for (const w of state.ws) {
     out.push({ type: 'ws', label: w.name, hint: w.boards.length + (w.boards.length === 1 ? ' board' : ' boards'), run: () => {
@@ -140,6 +171,19 @@ function paletteIndex() {
     } });
     for (const b of w.boards) {
       out.push({ type: 'board', label: b.name, hint: w.name, run: () => locateBoard(w, b) });
+      // FG-17: "Add card to <board>" quick-entry
+      out.push({ type: 'addcard', label: 'Add card to ' + b.name, hint: w.name, run: () => {
+        closeAnyModal();
+        state.view = 'tasks';
+        state.activeWs = w.id;
+        save();
+        renderAll();
+        // locate board and open composer
+        requestAnimationFrame(() => {
+          const bn = document.querySelector('.board[data-id="' + b.id + '"]');
+          if (bn && typeof openComposer === 'function') openComposer(bn, b);
+        });
+      }});
       for (const c of b.cards) {
         out.push({ type: 'card', label: c.t, hay: c.t + ' ' + (c.d || '') + ' ' + c.tags.join(' '),
           hint: w.name + ' · ' + b.name, run: () => locateCard(w, c) });
@@ -160,6 +204,45 @@ function paletteIndex() {
     }
   }
   return out;
+}
+
+/* ---------- FG-05: library search — manifest cached 5min ---------- */
+let _libManifestCache = null;
+let _libManifestTs = 0;
+const _LIB_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+
+function _appendLibraryItems(out) {
+  // If cache is fresh, append synchronously (items added before palette renders)
+  const now = Date.now();
+  if (_libManifestCache && (now - _libManifestTs) < _LIB_CACHE_TTL) {
+    _addManifestEntries(out, _libManifestCache);
+    return;
+  }
+  // Attempt fetch in background — items won't appear until next palette open if cold
+  fetch('./library/manifest.json', { cache: 'no-cache' })
+    .then(r => r.ok ? r.json() : null)
+    .then(data => {
+      if (data && Array.isArray(data.items)) {
+        _libManifestCache = data;
+        _libManifestTs = Date.now();
+      }
+    })
+    .catch(() => {}); // graceful: local dev without symlink
+}
+
+function _addManifestEntries(out, data) {
+  if (!data || !Array.isArray(data.items)) return;
+  const items = data.items.slice(0, 200); // cap
+  for (const item of items) {
+    if (!item || !item.id) continue;
+    out.push({
+      type: 'article',
+      label: item.title || item.id,
+      hay: (item.title || '') + ' ' + (item.subtitle || '') + ' ' + (item.collection || ''),
+      hint: item.collection || 'Library',
+      run: () => { window.location.href = 'library.html#/read/' + encodeURIComponent(item.id); }
+    });
+  }
 }
 
 function paletteScore(entry, q) {
