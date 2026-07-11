@@ -33,11 +33,22 @@ function collCls(slug) {
 }
 
 /* ===== STATE ===== */
-let allItems = [];
+let allItems = [];       // citrini items from manifest
+let _userNormItems = []; // user items (normalized), set by LibUser
 let manifest = null;
 let fulltextIndex = null;  // {slug: plaintext} — lazy-loaded
 let fulltextLoading = false;
 let ftLoaded = false;
+
+// Injected by LibUser after IDB load
+function _setUserItems(items) {
+  _userNormItems = items || [];
+}
+
+// Combined view: user items first, then citrini
+function _allMerged() {
+  return _userNormItems.concat(allItems);
+}
 
 // Filter/sort/view state
 let state = {
@@ -97,9 +108,9 @@ async function loadArticle(slug) {
 
 /* ===== FILTERING & SORTING ===== */
 function getFiltered(searchSnippets) {
-  let items = allItems.slice();
+  let items = _allMerged();
 
-  // Filter by collection/type/source
+  // Filter by collection/type/source/folder
   if (state.filter !== 'all') {
     if (state.filter.startsWith('coll:')) {
       const c = state.filter.slice(5);
@@ -107,9 +118,16 @@ function getFiltered(searchSnippets) {
     } else if (state.filter.startsWith('type:')) {
       const t = state.filter.slice(5);
       items = items.filter(i => i.type === t);
+    } else if (state.filter === 'source:citrini') {
+      items = items.filter(i => i.source === 'citrini');
+    } else if (state.filter === 'source:user') {
+      items = items.filter(i => i.source === 'user');
     } else if (state.filter.startsWith('source:')) {
       const s = state.filter.slice(7);
       items = items.filter(i => i.source === s);
+    } else if (state.filter.startsWith('folder:')) {
+      const f = state.filter.slice(7);
+      items = items.filter(i => i.folder === f && i.source === 'user');
     }
   }
 
@@ -136,11 +154,12 @@ function getFiltered(searchSnippets) {
         i.title.toLowerCase().includes(q) ||
         (i.subtitle || '').toLowerCase().includes(q));
     } else {
-      // Manifest-field search
+      // Manifest-field search (also search user item body)
       items = items.filter(i =>
         i.title.toLowerCase().includes(q) ||
         (i.subtitle || '').toLowerCase().includes(q) ||
-        (i.collection || '').toLowerCase().includes(q)
+        (i.collection || '').toLowerCase().includes(q) ||
+        (i.body || '').toLowerCase().includes(q)
       );
     }
   }
@@ -154,13 +173,28 @@ function getFiltered(searchSnippets) {
   return items;
 }
 
-/* ===== COLLECTION SIDEBAR COUNTS ===== */
+/* ===== COLLECTION SIDEBAR COUNTS (citrini only) ===== */
 function collectionCounts() {
   const counts = {};
   allItems.forEach(i => {
     counts[i.collection] = (counts[i.collection] || 0) + 1;
   });
   return counts;
+}
+
+/* ===== USER FOLDER COUNTS ===== */
+function userFolderCounts() {
+  const counts = {};
+  _userNormItems.forEach(i => {
+    const folder = i.folder || '';
+    counts[folder] = (counts[folder] || 0) + 1;
+  });
+  return counts;
+}
+
+/* ===== FIND USER ITEM BY ID ===== */
+function findUserItemById(id) {
+  return _userNormItems.find(i => i.id === id) || null;
 }
 
 /* ===== HELPERS ===== */
@@ -239,7 +273,7 @@ function parseHash() {
 }
 
 function findItemBySlug(slug) {
-  return allItems.find(i => i.id === slug) || null;
+  return _allMerged().find(i => i.id === slug) || null;
 }
 
 /* ===== PUBLIC API ===== */
@@ -263,6 +297,8 @@ return {
   loadArticle,
   getFiltered,
   collectionCounts,
+  userFolderCounts,
+  findUserItemById,
   collMeta,
   collCls,
   fmtDate,
@@ -276,5 +312,9 @@ return {
   pushHash,
   parseHash,
   findItemBySlug,
+
+  // User items support
+  _setUserItems,
+  get _userNormItems() { return _userNormItems; },
 };
 })();

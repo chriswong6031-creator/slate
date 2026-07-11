@@ -40,58 +40,9 @@
 <!-- APP -->
 <div class="lib-app" id="lib-app">
 
-  <!-- SIDEBAR -->
+  <!-- SIDEBAR — built dynamically by LibViews.buildSidebar() -->
   <nav id="lib-sidebar" aria-label="Library navigation">
-    <div class="lib-sb-section">
-      <div class="lib-sb-label">Library</div>
-      <button class="lib-sb-item active" data-filter="all" aria-label="All items">
-        <div class="lib-sb-item-left">
-          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><rect x="1" y="2" width="6" height="8" rx="1.5"/><rect x="9" y="6" width="6" height="8" rx="1.5"/><path d="M4 12v2M12 2v2"/></svg>
-          All Items
-        </div>
-        <span class="lib-sb-count" id="lib-count-all">—</span>
-      </button>
-      <button class="lib-sb-item" data-filter="source:citrini" aria-label="Citrini Research">
-        <div class="lib-sb-item-left">
-          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="8" cy="8" r="6.5"/><path d="M8 5.5v5M5.5 8h5"/></svg>
-          Citrini Research
-        </div>
-        <span class="lib-sb-count" id="lib-count-citrini">—</span>
-      </button>
-    </div>
-
-    <div class="lib-sb-section">
-      <div class="lib-sb-label">Collections</div>
-      <div class="lib-coll-list" id="lib-sb-colls">
-        <!-- injected by JS -->
-      </div>
-    </div>
-
-    <div class="lib-sb-section">
-      <div class="lib-sb-label">Files</div>
-      <button class="lib-sb-item lib-quiet" data-filter="type:pdf" aria-label="PDFs">
-        <div class="lib-sb-item-left">
-          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><rect x="2" y="1" width="12" height="14" rx="2"/><path d="M5 5h6M5 8h4"/></svg>
-          PDFs
-        </div>
-        <span class="lib-sb-count" style="opacity:0.45">0</span>
-      </button>
-      <button class="lib-sb-item lib-quiet" data-filter="type:file" aria-label="Files">
-        <div class="lib-sb-item-left">
-          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M4 1.8h5L12.2 5v9.2H4z"/><path d="M9 1.8V5h3.2"/></svg>
-          Files
-        </div>
-        <span class="lib-sb-count" style="opacity:0.45">0</span>
-      </button>
-      <button class="lib-sb-item lib-quiet" data-filter="type:writeup" aria-label="Write-ups">
-        <div class="lib-sb-item-left">
-          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M12 2l2 2-9 9H3v-2L12 2z"/><path d="M10 4l2 2"/></svg>
-          Write-ups
-        </div>
-        <span class="lib-sb-count" style="opacity:0.45">0</span>
-      </button>
-      <div class="lib-sb-hint">Added via CLI</div>
-    </div>
+    <!-- injected by LibViews.buildSidebar() -->
   </nav>
 
   <!-- MAIN -->
@@ -265,6 +216,7 @@
 <script src="js/library-data.js"></script>
 <script src="js/library-views.js"></script>
 <script src="js/library-reader.js"></script>
+<script src="js/library-user.js"></script>
 <script>
 /* ===== APP ORCHESTRATOR ===== */
 'use strict';
@@ -276,41 +228,6 @@ const R = window.LibReader;
 
 let sortCycleIdx = 0;
 let ftSnippets = new Map();
-
-/* ===== RENDER LOOP ===== */
-function renderAll() {
-  const isSearch = !!D.state.search;
-  const items = D.getFiltered(ftSnippets);
-  V.setSnippets(ftSnippets);
-
-  V.updateToolbar(items, D.state.filterLabel);
-  V.syncSidebarActive(D.state.filter);
-
-  if (D.state.view === 'grid') {
-    const hero = document.getElementById('lib-hero');
-    if (isSearch) {
-      if (hero) hero.style.display = 'none';
-      V.renderGrid(items, true);
-    } else if (D.state.filter !== 'all' && !D.state.filter.startsWith('source:')) {
-      if (hero) hero.style.display = 'none';
-      V.renderGrid(items, false);
-    } else {
-      if (items.length) {
-        V.renderHero(items[0]);
-        V.renderGrid(items.slice(1), false, 1);
-      } else {
-        if (hero) hero.style.display = 'none';
-        V.renderGrid([], false);
-      }
-    }
-  } else {
-    V.renderList(items);
-    // Reset preview when filter changes
-    V.renderPreview(null);
-  }
-
-  V.showEmpty(!items.length);
-}
 
 /* ===== FILTER ===== */
 function applyFilter(filter, label) {
@@ -340,6 +257,40 @@ function handleSearch(q) {
   }
 }
 
+/* ===== RENDER ALL (exposed for LibUser callbacks) ===== */
+function renderAll() {
+  const isSearch = !!D.state.search;
+  const items = D.getFiltered(ftSnippets);
+  V.setSnippets(ftSnippets);
+
+  V.updateToolbar(items, D.state.filterLabel);
+  V.syncSidebarActive(D.state.filter);
+
+  if (D.state.view === 'grid') {
+    const hero = document.getElementById('lib-hero');
+    if (isSearch) {
+      if (hero) hero.style.display = 'none';
+      V.renderGrid(items, true);
+    } else if (D.state.filter !== 'all' && !D.state.filter.startsWith('source:')) {
+      if (hero) hero.style.display = 'none';
+      V.renderGrid(items, false);
+    } else {
+      if (items.length) {
+        V.renderHero(items[0]);
+        V.renderGrid(items.slice(1), false, 1);
+      } else {
+        if (hero) hero.style.display = 'none';
+        V.renderGrid([], false);
+      }
+    }
+  } else {
+    V.renderList(items);
+    V.renderPreview(null);
+  }
+
+  V.showEmpty(!items.length);
+}
+
 /* ===== INIT ===== */
 async function init() {
   D.initTheme();
@@ -348,15 +299,6 @@ async function init() {
 
   // Theme toggle
   document.getElementById('lib-theme-btn').addEventListener('click', D.toggleTheme);
-
-  // Sidebar static items
-  document.querySelectorAll('.lib-sb-item[data-filter]').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const f = btn.getAttribute('data-filter');
-      const label = btn.querySelector('.lib-sb-item-left')?.textContent?.trim() || 'All Items';
-      applyFilter(f, label);
-    });
-  });
 
   // Sort
   document.getElementById('lib-sort-btn').addEventListener('click', () => {
@@ -368,7 +310,6 @@ async function init() {
 
   // View toggle
   document.getElementById('lib-view-grid').addEventListener('click', () => {
-    D.state.sort = D.state.sort; // no change
     D.state.view = 'grid';
     V.setViewMode('grid');
     localStorage.setItem('slate-lib-view', 'grid');
@@ -414,18 +355,21 @@ async function init() {
     if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); if (D.filteredItems.length) R.open(0); }
   });
 
-  // Sidebar add hint
-  const addBtn = document.getElementById('lib-sb-add-btn');
-  if (addBtn) addBtn.addEventListener('click', () => V.showToast('Ingest is CLI-side — use slate-lib add <url>', 3000));
-
-  // Load manifest
+  // Load manifest + user items in parallel
   try {
+    const U = window.LibUser;
+
+    // Load citrini manifest
     await D.loadManifest();
+
+    // Load user items from IDB (non-blocking on IDB failure)
+    if (U) {
+      await U.loadUserItems();
+      U.mergeIntoAllItems();
+    }
+
+    // Build sidebar with merged counts
     V.buildSidebar();
-    // Update citrini source count
-    const citriniCount = D.allItems.filter(i => i.source === 'citrini').length;
-    const cc = document.getElementById('lib-count-citrini');
-    if (cc) cc.textContent = citriniCount;
 
     // Always render the grid first so closing a deep-linked reader (Esc/back)
     // returns to a populated library, then let the hash route open on top.
@@ -449,7 +393,9 @@ async function init() {
 
 init();
 
-return { applyFilter };
+// renderAll is part of the public surface: library-user.js (save/undo) and the
+// delete paths in views/reader re-render through window.LibApp.renderAll().
+return { applyFilter, renderAll };
 })();
 </script>
 </body>
