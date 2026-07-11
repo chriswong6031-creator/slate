@@ -297,6 +297,13 @@ async function init() {
   R.initKeyboard();
   R.initNavButtons();
 
+  // C2: Request persistent storage so IDB data survives storage pressure / iOS eviction
+  if (navigator.storage && navigator.storage.persist) {
+    navigator.storage.persist().then(granted => {
+      console.log('Slate Library: storage persistence', granted ? 'granted' : 'best-effort');
+    }).catch(() => {});
+  }
+
   // Theme toggle
   document.getElementById('lib-theme-btn').addEventListener('click', D.toggleTheme);
 
@@ -355,29 +362,45 @@ async function init() {
     if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); if (D.filteredItems.length) R.open(0); }
   });
 
-  // Load manifest + user items in parallel
-  try {
-    const U = window.LibUser;
+  // C7: Load manifest and user items independently so a manifest failure never
+  // prevents the user's own local IDB content from rendering.
+  const U = window.LibUser;
 
-    // Load citrini manifest
-    await D.loadManifest();
-
-    // Load user items from IDB (non-blocking on IDB failure)
-    if (U) {
+  // 1. User items from IDB (fully offline/local — must not be blocked by network)
+  if (U) {
+    try {
       await U.loadUserItems();
       U.mergeIntoAllItems();
+    } catch (e) {
+      console.warn('Slate Library: could not load user items', e);
     }
+  }
 
-    // Build sidebar with merged counts
-    V.buildSidebar();
-
-    // Always render the grid first so closing a deep-linked reader (Esc/back)
-    // returns to a populated library, then let the hash route open on top.
-    renderAll();
-    await R.handleHashRoute();
+  // 2. Citrini manifest (network-dependent; degrade gracefully to an error notice)
+  let manifestErr = null;
+  try {
+    await D.loadManifest();
   } catch (e) {
-    document.getElementById('lib-card-grid').innerHTML =
-      '<p style="color:var(--danger);padding:24px">Failed to load library: ' + D.escHtml(e.message) + '</p>';
+    manifestErr = e;
+    // Show an offline/error notice in the Citrini section, but continue rendering user content
+    const grid = document.getElementById('lib-card-grid');
+    if (grid) {
+      const notice = document.createElement('div');
+      notice.className = 'lib-citrini-offline';
+      notice.innerHTML = '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="8" cy="8" r="6"/><path d="M8 5v3.5M8 10.5v.5"/></svg> Citrini articles unavailable — ' + D.escHtml(e.message);
+      grid.appendChild(notice);
+    }
+  }
+
+  // Build sidebar with whatever we have (may be user-only if manifest failed)
+  V.buildSidebar();
+
+  // Always render the grid first so closing a deep-linked reader (Esc/back)
+  // returns to a populated library, then let the hash route open on top.
+  renderAll();
+
+  if (!manifestErr) {
+    await R.handleHashRoute();
   }
 
   // Hash navigation (back/forward)
@@ -396,6 +419,29 @@ init();
 // renderAll is part of the public surface: library-user.js (save/undo) and the
 // delete paths in views/reader re-render through window.LibApp.renderAll().
 return { applyFilter, renderAll };
+})();
+</script>
+<script id="error-handlers">
+/* C8: Global error handlers — surface async failures as a quiet rate-limited toast */
+(function() {
+  let _errToastMs = 0;
+  const _ERR_RATE_LIMIT = 5000;
+  function _showErrToast(msg) {
+    const now = Date.now();
+    if (now - _errToastMs < _ERR_RATE_LIMIT) return;
+    _errToastMs = now;
+    if (window.LibUser && typeof window.LibUser.showLibToast === 'function') {
+      window.LibUser.showLibToast('Something went wrong — your last action may not have saved.', 5000);
+    }
+    console.warn('Slate Library: unhandled error:', msg);
+  }
+  window.addEventListener('unhandledrejection', e => {
+    _showErrToast(e.reason && (e.reason.message || String(e.reason)));
+  });
+  window.addEventListener('error', e => {
+    if (e.filename && !/\.(js)$/i.test(e.filename)) return;
+    _showErrToast(e.message);
+  });
 })();
 </script>
 </body>

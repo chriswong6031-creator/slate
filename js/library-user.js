@@ -441,6 +441,20 @@ function openComposer(editItem) {
     let fileKey = editItem ? editItem.fileKey : null;
 
     if (_attachedBlob) {
+      // C3: quota pre-check before storing the blob
+      if (navigator.storage && navigator.storage.estimate) {
+        try {
+          const est = await navigator.storage.estimate();
+          const remaining = (est.quota || 0) - (est.usage || 0);
+          const GUARD_BYTES = 500 * 1024 * 1024; // 500 MB headroom guard
+          if (remaining > 0 && _attachedBlob.size > remaining - GUARD_BYTES) {
+            const fileMB = (_attachedBlob.size / 1048576).toFixed(1);
+            const freeMB = (Math.max(0, remaining - GUARD_BYTES) / 1048576).toFixed(0);
+            showLibToast(`PDF is ${fileMB} MB but only ~${freeMB} MB storage remains — free up space or export a backup first.`, 6000);
+            return;
+          }
+        } catch (_) {}
+      }
       type = 'pdf';
       fileKey = 'pdf-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6);
       try {
@@ -481,6 +495,71 @@ function escHtmlAttr(s) {
     .replace(/"/g, '&quot;');
 }
 
+/* ===== C1: Full library export (items + PDF blobs as base64) ===== */
+async function exportAll() {
+  const items = await idbGetAll('items');
+  // Read all file records from the 'files' store
+  let fileRecs = [];
+  try { fileRecs = await idbGetAll('files'); } catch (_) {}
+
+  // Convert Blob objects to base64 strings for JSON serialisation
+  const files = {};
+  for (const rec of fileRecs) {
+    if (!rec || !rec.key || !rec.blob) continue;
+    try {
+      const b64 = await new Promise((resolve, reject) => {
+        const r = new FileReader();
+        r.onload = () => {
+          // FileReader gives data URL — strip the prefix to store pure base64
+          const du = r.result;
+          const comma = du.indexOf(',');
+          resolve(comma >= 0 ? du.slice(comma + 1) : du);
+        };
+        r.onerror = reject;
+        r.readAsDataURL(rec.blob);
+      });
+      files[rec.key] = {
+        base64: b64,
+        type: rec.blob.type || 'application/pdf',
+        size: rec.blob.size,
+      };
+    } catch (_) {}
+  }
+  return { items, files };
+}
+
+/* ===== C1: Full library import (items + PDF blobs) ===== */
+async function importAll(libraryPayload) {
+  const { items = [], files = {} } = libraryPayload || {};
+
+  // Restore items
+  for (const item of items) {
+    try { await idbPut('items', item); } catch (_) {}
+  }
+
+  // Restore file blobs
+  for (const [key, fileData] of Object.entries(files)) {
+    try {
+      let blob;
+      if (fileData && fileData.base64) {
+        // base64 → Uint8Array → Blob
+        const bin = atob(fileData.base64);
+        const arr = new Uint8Array(bin.length);
+        for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+        blob = new Blob([arr], { type: fileData.type || 'application/pdf' });
+      } else if (fileData instanceof Blob) {
+        blob = fileData;
+      }
+      if (blob) await idbPut('files', { key, blob });
+    } catch (_) {}
+  }
+
+  // Reload in-memory list
+  await loadUserItems();
+  mergeIntoAllItems();
+  return items.length;
+}
+
 /* ===== IDB availability check ===== */
 function isAvailable() { return _idbAvailable; }
 
@@ -500,6 +579,8 @@ return {
   isAvailable,
   showLibToast,
   showUndoToast,
+  exportAll,
+  importAll,
 };
 
 })();

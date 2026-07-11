@@ -626,6 +626,27 @@ body.dragging-any, body.dragging-any * { cursor: grabbing !important; user-selec
 }
 .modal-backdrop.show .modal { transform: none; }
 .modal.drop-target { box-shadow: 0 0 0 2.5px var(--accent), var(--shadow-pop); }
+/* close button — top-right of modal */
+.modal-close-btn {
+  position: absolute;
+  top: 11px;
+  right: 12px;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  border: none;
+  background: transparent;
+  color: var(--ink-3);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0.7;
+  transition: opacity 140ms, background 140ms;
+  z-index: 1;
+}
+.modal-close-btn:hover { opacity: 1; background: var(--line); }
+.modal { position: relative; }
 .modal-accent { height: 5px; flex: 0 0 5px; background: transparent; border-radius: 16px 16px 0 0; }
 .modal[class*="tint-"] .modal-accent { background: var(--t-bar); }
 .modal-body { padding: 18px 22px 6px; display: flex; flex-direction: column; gap: 16px; }
@@ -1074,7 +1095,8 @@ body.dragging-any, body.dragging-any * { cursor: grabbing !important; user-selec
 @media (max-width: 640px) {
   .modal-backdrop { padding: 24px 0 0; align-items: flex-end; }
   .modal {
-    width: 100%;
+    width: 100vw;
+    max-width: 100vw;
     max-height: calc(100vh - 24px);
     max-height: calc(100dvh - 24px); /* dvh tracks the soft keyboard on mobile */
     border-radius: 18px 18px 0 0;
@@ -1091,6 +1113,39 @@ body.dragging-any, body.dragging-any * { cursor: grabbing !important; user-selec
   .lightbox { padding: 14px; }
   .lightbox-name { max-width: 40vw; }
 }
+
+/* ---------- sticky save-error banner (C3: shown when localStorage write fails) ---------- */
+.save-error-banner {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  z-index: 9999;
+  background: var(--danger, #D14D4D);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 550;
+  padding: 10px 44px 10px 16px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  line-height: 1.4;
+}
+.save-error-banner-close {
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: transparent;
+  border: none;
+  color: #fff;
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0.8;
+  padding: 4px;
+}
+.save-error-banner-close:hover { opacity: 1; }
 
 </style>
 <style>
@@ -1982,6 +2037,7 @@ function tagColor(name) { // deterministic tag color from name
 
 /* ---------- state ---------- */
 const LS_KEY = 'slate.state.v1';
+const THEME_KEY = 'slate.theme.v1'; // own key so library-page writes never get clobbered by main-app saveNow
 let state = null;
 let zCounter = 10;
 
@@ -2079,12 +2135,58 @@ function loadState() {
   return seedState();
 }
 
+/* ---------- theme helpers (own key so cross-tab writes are never clobbered) ---------- */
+function loadThemePref() {
+  // 1. Dedicated key (authoritative, set by both pages)
+  const t = localStorage.getItem(THEME_KEY);
+  if (t === 'dark' || t === 'light') return t;
+  // 2. Legacy: migrate from old state.theme in slate.state.v1
+  try {
+    const s = JSON.parse(localStorage.getItem(LS_KEY) || '{}');
+    if (s.theme === 'dark' || s.theme === 'light') {
+      localStorage.setItem(THEME_KEY, s.theme);
+      return s.theme;
+    }
+  } catch (_) {}
+  return null;
+}
+function saveThemePref(t) {
+  localStorage.setItem(THEME_KEY, t);
+}
+
+/* ---------- sticky unsaved-changes banner (shown when saveNow fails) ---------- */
+let _saveBanner = null;
+function _showSaveBanner() {
+  if (_saveBanner) return; // already visible
+  const b = document.createElement('div');
+  b.id = 'slate-save-error-banner';
+  b.className = 'save-error-banner';
+  b.textContent = 'Not saving — storage full. Export a backup to avoid data loss.';
+  const cl = document.createElement('button');
+  cl.className = 'save-error-banner-close';
+  cl.textContent = '×';
+  cl.setAttribute('aria-label', 'Dismiss');
+  cl.addEventListener('click', () => { b.remove(); _saveBanner = null; });
+  b.appendChild(cl);
+  document.body.appendChild(b);
+  _saveBanner = b;
+}
+function _hideSaveBanner() {
+  if (_saveBanner) { _saveBanner.remove(); _saveBanner = null; }
+}
+
 const save = debounce(saveNow, 150);
 function saveNow() {
   try {
+    // Sync state.theme from the authoritative THEME_KEY before serialising,
+    // so a library-page theme toggle never gets clobbered by a main-app save.
+    const currentTheme = localStorage.getItem(THEME_KEY);
+    if (currentTheme && state.theme !== currentTheme) state.theme = currentTheme;
     localStorage.setItem(LS_KEY, JSON.stringify(state));
+    _hideSaveBanner(); // clear the sticky banner once a save succeeds
   } catch (e) {
     console.error('Slate: save failed', e);
+    _showSaveBanner(); // sticky banner, not a transient toast (C3)
     if (typeof toast === 'function') toast('Storage is full — remove some attachments or export a backup', { tone: 'danger' });
   }
 }
@@ -2274,6 +2376,8 @@ const BOARD_W = 300, TIDY_GAP = 24, TIDY_ORIGIN = 48;
 
 function applyTheme() {
   document.documentElement.dataset.theme = state.theme;
+  // Write to the dedicated key so library page can observe it via storage event
+  saveThemePref(state.theme);
   const sun = $('#themeIconSun'), moon = $('#themeIconMoon');
   if (sun && moon) {
     sun.style.display = state.theme === 'dark' ? 'none' : '';
@@ -2284,6 +2388,16 @@ function applyTheme() {
   const meta = $('meta[name="theme-color"]');
   if (meta) meta.content = state.theme === 'dark' ? '#0F1216' : '#F5F6F8';
 }
+
+// Cross-tab theme sync: when the library page updates slate.theme.v1, reflect it here
+window.addEventListener('storage', (e) => {
+  if (e.key !== THEME_KEY || !state) return;
+  const t = e.newValue;
+  if ((t === 'dark' || t === 'light') && state.theme !== t) {
+    state.theme = t;
+    applyTheme();
+  }
+});
 
 function renderTopbar() {
   const brain = state.view === 'brain';
@@ -4252,11 +4366,14 @@ function paletteIndex() {
     save();
     navToIndex();
   } });
-  out.push({ type: 'action', label: 'Toggle dark mode', hint: 'Theme', run: () => {
-    state.theme = state.theme === 'dark' ? 'light' : 'dark';
-    save();
-    applyTheme();
-  } });
+  out.push({ type: 'action',
+    label: state.theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode',
+    hint: 'Theme', run: () => {
+      state.theme = state.theme === 'dark' ? 'light' : 'dark';
+      saveThemePref(state.theme);
+      save();
+      applyTheme();
+    } });
   out.push({ type: 'action', label: 'Tidy boards', hint: 'Boards', run: () => {
     closeAnyModal();
     state.view = 'tasks';
@@ -4265,6 +4382,7 @@ function paletteIndex() {
     tidyBoards();
   } });
   out.push({ type: 'action', label: 'Export backup', hint: 'Data', run: () => exportBackup() });
+  out.push({ type: 'action', label: 'Export Brain as Markdown', hint: 'Data', run: () => exportBrainMarkdown() });
 
   for (const w of state.ws) {
     out.push({ type: 'ws', label: w.name, hint: w.boards.length + (w.boards.length === 1 ? ' board' : ' boards'), run: () => {
@@ -4452,6 +4570,15 @@ function openCardModal(cardId) {
   modal.dataset.cardId = card.id;
   const accent = el('div', 'modal-accent');
   modal.appendChild(accent);
+
+  /* close button (visible X in top-right corner) */
+  const closeBtnEl = el('button', 'modal-close-btn');
+  closeBtnEl.title = 'Close';
+  closeBtnEl.setAttribute('aria-label', 'Close');
+  closeBtnEl.appendChild(svgIcon(ICONS.x, 13, 2));
+  closeBtnEl.addEventListener('click', () => closeModal());
+  modal.appendChild(closeBtnEl);
+
   const body = el('div', 'modal-body');
   modal.appendChild(body);
 
@@ -4804,15 +4931,77 @@ function openWsSwitcher() {
 
 /* ---------- settings ---------- */
 async function exportBackup() {
+  // v1 attachment files (card image attachments in the main app IDB)
   const files = await fileAll();
-  const payload = { app: 'slate', v: 1, exported: new Date().toISOString(), state: state, files: files };
+
+  // v2: also drain the library IDB (user items + PDF blobs as base64)
+  let library = null;
+  if (window.LibUser && typeof window.LibUser.exportAll === 'function') {
+    try { library = await window.LibUser.exportAll(); } catch (_) {}
+  }
+
+  const payload = {
+    app: 'slate',
+    v: 2,
+    exported: new Date().toISOString(),
+    state,
+    files,
+    library,  // { items: [...], files: { key: { base64, type, size } } } or null
+  };
   const blob = new Blob([JSON.stringify(payload)], { type: 'application/json' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
   a.download = 'slate-backup-' + todayISO() + '.json';
   document.body.appendChild(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(a.href), 10000);
-  toast('Backup exported');
+  const libCount = library && library.items ? library.items.length : 0;
+  toast('Backup exported' + (libCount ? ' (incl. ' + libCount + ' library item' + (libCount !== 1 ? 's' : '') + ')' : ''));
+}
+
+/* ---------- Export Brain as Markdown ---------- */
+function exportBrainMarkdown() {
+  const lines = ['# Slate Brain Export', '', '**Exported:** ' + new Date().toLocaleString(), ''];
+  const ws = state.ws || [];
+  for (const w of ws) {
+    lines.push('## Workspace: ' + (w.name || 'Unnamed'));
+    lines.push('');
+    const boards = w.boards || [];
+    for (const b of boards) {
+      lines.push('### Board: ' + (b.n || 'Unnamed'));
+      lines.push('');
+      // Active cards
+      const cards = b.cards || [];
+      if (cards.length) {
+        lines.push('**Cards:**');
+        for (const c of cards) {
+          lines.push('- ' + (c.t || '(untitled)') + (c.due ? ' [due: ' + c.due + ']' : '') + (c.tags && c.tags.length ? ' [' + c.tags.join(', ') + ']' : ''));
+          if (c.desc && c.desc.trim()) {
+            // indent description
+            c.desc.trim().split('\n').forEach(dl => lines.push('  ' + dl));
+          }
+        }
+        lines.push('');
+      }
+      // Done cards
+      const done = b.done || [];
+      if (done.length) {
+        lines.push('**Completed (' + done.length + '):**');
+        for (const c of done) {
+          lines.push('- ~~' + (c.t || '(untitled)') + '~~');
+        }
+        lines.push('');
+      }
+    }
+  }
+
+  const md = lines.join('\n');
+  const blob = new Blob([md], { type: 'text/markdown' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'slate-brain-' + todayISO() + '.md';
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+  toast('Brain exported as Markdown');
 }
 
 function openSettings() {
@@ -4844,9 +5033,18 @@ function openSettings() {
           for (const [id, dataUrl] of Object.entries(payload.files || {})) await filePut(id, dataUrl);
           state = migrateState(st); // normalizes shape so renderers can't throw on a crafted payload
           saveNow();
+
+          // v2: restore library IDB data (items + PDF blobs)
+          let libCount = 0;
+          if (payload.library && window.LibUser && typeof window.LibUser.importAll === 'function') {
+            try { libCount = await window.LibUser.importAll(payload.library); } catch (_) {}
+          }
+
           // register the undo BEFORE rendering — even if a render fails, the restore path exists
-          undoableToast('Backup imported — replaced ' + prev.ws.length +
-            (prev.ws.length === 1 ? ' workspace' : ' workspaces'), () => { state = prev; });
+          const msg = 'Backup imported — replaced ' + prev.ws.length +
+            (prev.ws.length === 1 ? ' workspace' : ' workspaces') +
+            (libCount ? ' + ' + libCount + ' library item' + (libCount !== 1 ? 's' : '') : '');
+          undoableToast(msg, () => { state = prev; });
           renderAll();
         } catch (e) {
           console.error(e);
@@ -4856,6 +5054,10 @@ function openSettings() {
         }
       });
       input.click();
+    }));
+    pop.appendChild(popItem('Export Brain as Markdown', ICONS.download, () => {
+      close();
+      exportBrainMarkdown();
     }));
     const divider = el('div', 'pop-divider');
     pop.appendChild(divider);
@@ -4867,6 +5069,9 @@ function openSettings() {
 /* ---------- init ---------- */
 (function init() {
   state = loadState();
+  // Prefer the dedicated theme key (may have been set by library page since last save)
+  const savedTheme = loadThemePref();
+  if (savedTheme) state.theme = savedTheme;
   renderAll();
   $('#wsSwitcher').addEventListener('click', openWsSwitcher);
   $('#settingsBtn').addEventListener('click', openSettings);
@@ -4879,17 +5084,50 @@ function openSettings() {
   // brainTabs sub-seg removed in v2 — no listeners needed
   $('#themeBtn').addEventListener('click', () => {
     state.theme = state.theme === 'dark' ? 'light' : 'dark';
+    saveThemePref(state.theme); // write dedicated key first; applyTheme() also writes it
     save();
     applyTheme();
   });
   $('#tidyBtn').addEventListener('click', tidyBoards);
   setTimeout(gcAttachments, 4000); // sweep orphaned attachment blobs off the interaction path
+
+  // C2: Request persistent storage so IDB data survives storage pressure / iOS eviction
+  if (navigator.storage && navigator.storage.persist) {
+    navigator.storage.persist().then(granted => {
+      console.log('Slate: storage persistence', granted ? 'granted' : 'best-effort (not granted)');
+    }).catch(() => {});
+  }
+
   if (recoveryKey) {
     toast('Saved data could not be read — a copy was kept at localStorage["' + recoveryKey + '"]',
       { tone: 'danger', ms: 12000 });
   }
 })();
 
+</script>
+<script id="error-handlers">
+/* C8: Global error handlers — surface async failures as a quiet rate-limited toast */
+(function() {
+  let _errToastMs = 0;
+  const _ERR_RATE_LIMIT = 5000; // ms between error toasts
+  function _showErrToast(msg) {
+    const now = Date.now();
+    if (now - _errToastMs < _ERR_RATE_LIMIT) return;
+    _errToastMs = now;
+    if (typeof toast === 'function') {
+      toast('Something went wrong — your last action may not have saved. Export a backup if in doubt.', { tone: 'danger', ms: 6000 });
+    }
+    console.warn('Slate: unhandled error:', msg);
+  }
+  window.addEventListener('unhandledrejection', e => {
+    _showErrToast(e.reason && (e.reason.message || String(e.reason)));
+  });
+  window.addEventListener('error', e => {
+    // Skip favicon/asset 404s (those are not JS errors)
+    if (e.filename && !/\.(js)$/i.test(e.filename)) return;
+    _showErrToast(e.message);
+  });
+})();
 </script>
 </body>
 </html>

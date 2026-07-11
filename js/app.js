@@ -16,6 +16,15 @@ function openCardModal(cardId) {
   modal.dataset.cardId = card.id;
   const accent = el('div', 'modal-accent');
   modal.appendChild(accent);
+
+  /* close button (visible X in top-right corner) */
+  const closeBtnEl = el('button', 'modal-close-btn');
+  closeBtnEl.title = 'Close';
+  closeBtnEl.setAttribute('aria-label', 'Close');
+  closeBtnEl.appendChild(svgIcon(ICONS.x, 13, 2));
+  closeBtnEl.addEventListener('click', () => closeModal());
+  modal.appendChild(closeBtnEl);
+
   const body = el('div', 'modal-body');
   modal.appendChild(body);
 
@@ -368,15 +377,77 @@ function openWsSwitcher() {
 
 /* ---------- settings ---------- */
 async function exportBackup() {
+  // v1 attachment files (card image attachments in the main app IDB)
   const files = await fileAll();
-  const payload = { app: 'slate', v: 1, exported: new Date().toISOString(), state: state, files: files };
+
+  // v2: also drain the library IDB (user items + PDF blobs as base64)
+  let library = null;
+  if (window.LibUser && typeof window.LibUser.exportAll === 'function') {
+    try { library = await window.LibUser.exportAll(); } catch (_) {}
+  }
+
+  const payload = {
+    app: 'slate',
+    v: 2,
+    exported: new Date().toISOString(),
+    state,
+    files,
+    library,  // { items: [...], files: { key: { base64, type, size } } } or null
+  };
   const blob = new Blob([JSON.stringify(payload)], { type: 'application/json' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
   a.download = 'slate-backup-' + todayISO() + '.json';
   document.body.appendChild(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(a.href), 10000);
-  toast('Backup exported');
+  const libCount = library && library.items ? library.items.length : 0;
+  toast('Backup exported' + (libCount ? ' (incl. ' + libCount + ' library item' + (libCount !== 1 ? 's' : '') + ')' : ''));
+}
+
+/* ---------- Export Brain as Markdown ---------- */
+function exportBrainMarkdown() {
+  const lines = ['# Slate Brain Export', '', '**Exported:** ' + new Date().toLocaleString(), ''];
+  const ws = state.ws || [];
+  for (const w of ws) {
+    lines.push('## Workspace: ' + (w.name || 'Unnamed'));
+    lines.push('');
+    const boards = w.boards || [];
+    for (const b of boards) {
+      lines.push('### Board: ' + (b.n || 'Unnamed'));
+      lines.push('');
+      // Active cards
+      const cards = b.cards || [];
+      if (cards.length) {
+        lines.push('**Cards:**');
+        for (const c of cards) {
+          lines.push('- ' + (c.t || '(untitled)') + (c.due ? ' [due: ' + c.due + ']' : '') + (c.tags && c.tags.length ? ' [' + c.tags.join(', ') + ']' : ''));
+          if (c.desc && c.desc.trim()) {
+            // indent description
+            c.desc.trim().split('\n').forEach(dl => lines.push('  ' + dl));
+          }
+        }
+        lines.push('');
+      }
+      // Done cards
+      const done = b.done || [];
+      if (done.length) {
+        lines.push('**Completed (' + done.length + '):**');
+        for (const c of done) {
+          lines.push('- ~~' + (c.t || '(untitled)') + '~~');
+        }
+        lines.push('');
+      }
+    }
+  }
+
+  const md = lines.join('\n');
+  const blob = new Blob([md], { type: 'text/markdown' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'slate-brain-' + todayISO() + '.md';
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+  toast('Brain exported as Markdown');
 }
 
 function openSettings() {
@@ -408,9 +479,18 @@ function openSettings() {
           for (const [id, dataUrl] of Object.entries(payload.files || {})) await filePut(id, dataUrl);
           state = migrateState(st); // normalizes shape so renderers can't throw on a crafted payload
           saveNow();
+
+          // v2: restore library IDB data (items + PDF blobs)
+          let libCount = 0;
+          if (payload.library && window.LibUser && typeof window.LibUser.importAll === 'function') {
+            try { libCount = await window.LibUser.importAll(payload.library); } catch (_) {}
+          }
+
           // register the undo BEFORE rendering — even if a render fails, the restore path exists
-          undoableToast('Backup imported — replaced ' + prev.ws.length +
-            (prev.ws.length === 1 ? ' workspace' : ' workspaces'), () => { state = prev; });
+          const msg = 'Backup imported — replaced ' + prev.ws.length +
+            (prev.ws.length === 1 ? ' workspace' : ' workspaces') +
+            (libCount ? ' + ' + libCount + ' library item' + (libCount !== 1 ? 's' : '') : '');
+          undoableToast(msg, () => { state = prev; });
           renderAll();
         } catch (e) {
           console.error(e);
@@ -420,6 +500,10 @@ function openSettings() {
         }
       });
       input.click();
+    }));
+    pop.appendChild(popItem('Export Brain as Markdown', ICONS.download, () => {
+      close();
+      exportBrainMarkdown();
     }));
     const divider = el('div', 'pop-divider');
     pop.appendChild(divider);
@@ -431,6 +515,9 @@ function openSettings() {
 /* ---------- init ---------- */
 (function init() {
   state = loadState();
+  // Prefer the dedicated theme key (may have been set by library page since last save)
+  const savedTheme = loadThemePref();
+  if (savedTheme) state.theme = savedTheme;
   renderAll();
   $('#wsSwitcher').addEventListener('click', openWsSwitcher);
   $('#settingsBtn').addEventListener('click', openSettings);
@@ -443,11 +530,20 @@ function openSettings() {
   // brainTabs sub-seg removed in v2 — no listeners needed
   $('#themeBtn').addEventListener('click', () => {
     state.theme = state.theme === 'dark' ? 'light' : 'dark';
+    saveThemePref(state.theme); // write dedicated key first; applyTheme() also writes it
     save();
     applyTheme();
   });
   $('#tidyBtn').addEventListener('click', tidyBoards);
   setTimeout(gcAttachments, 4000); // sweep orphaned attachment blobs off the interaction path
+
+  // C2: Request persistent storage so IDB data survives storage pressure / iOS eviction
+  if (navigator.storage && navigator.storage.persist) {
+    navigator.storage.persist().then(granted => {
+      console.log('Slate: storage persistence', granted ? 'granted' : 'best-effort (not granted)');
+    }).catch(() => {});
+  }
+
   if (recoveryKey) {
     toast('Saved data could not be read — a copy was kept at localStorage["' + recoveryKey + '"]',
       { tone: 'danger', ms: 12000 });

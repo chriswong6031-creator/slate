@@ -6,6 +6,8 @@ const BOARD_W = 300, TIDY_GAP = 24, TIDY_ORIGIN = 48;
 
 function applyTheme() {
   document.documentElement.dataset.theme = state.theme;
+  // Write to the dedicated key so library page can observe it via storage event
+  saveThemePref(state.theme);
   const sun = $('#themeIconSun'), moon = $('#themeIconMoon');
   if (sun && moon) {
     sun.style.display = state.theme === 'dark' ? 'none' : '';
@@ -16,6 +18,16 @@ function applyTheme() {
   const meta = $('meta[name="theme-color"]');
   if (meta) meta.content = state.theme === 'dark' ? '#0F1216' : '#F5F6F8';
 }
+
+// Cross-tab theme sync: when the library page updates slate.theme.v1, reflect it here
+window.addEventListener('storage', (e) => {
+  if (e.key !== THEME_KEY || !state) return;
+  const t = e.newValue;
+  if ((t === 'dark' || t === 'light') && state.theme !== t) {
+    state.theme = t;
+    applyTheme();
+  }
+});
 
 function renderTopbar() {
   const brain = state.view === 'brain';
