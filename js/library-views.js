@@ -28,6 +28,20 @@ function buildSidebar() {
   try { uiPrefs = JSON.parse(localStorage.getItem('slate.library.ui.v1') || '{}'); } catch (_) {}
   const citriniCollapsed = !!uiPrefs.citriniCollapsed;
 
+  // Compute new count for FG-11 sidebar chip
+  const lastSeen = D.getLastSeen ? D.getLastSeen() : null;
+  let newChipHtml = '';
+  if (lastSeen) {
+    const lastSeenDate = new Date(lastSeen);
+    const newCount = D.allItems.filter(i => {
+      if (!i.date) return false;
+      try { return new Date(i.date) > lastSeenDate; } catch (_) { return false; }
+    }).length;
+    if (newCount > 0) {
+      newChipHtml = `<span id="lib-sb-new-chip">${newCount} new</span>`;
+    }
+  }
+
   // Build sidebar HTML
   let html = '';
 
@@ -37,7 +51,7 @@ function buildSidebar() {
       <button class="lib-sb-item active" data-filter="all" aria-label="All items, ${allTotal} items">
         <div class="lib-sb-item-left">
           <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><rect x="1" y="2" width="6" height="8" rx="1.5"/><rect x="9" y="6" width="6" height="8" rx="1.5"/><path d="M4 12v2M12 2v2"/></svg>
-          All Items
+          All Items${newChipHtml ? ' ' + newChipHtml : ''}
         </div>
         <span class="lib-sb-count" id="lib-count-all">${allTotal}</span>
       </button>
@@ -243,6 +257,12 @@ function renderHero(item) {
   if (coverWrap) {
     coverWrap.className = 'lib-hero-cover ' + cls;
   }
+
+  // FG-01: progress ring/done badge on hero cover
+  const heroProg = document.getElementById('lib-hero-progress');
+  if (heroProg) {
+    heroProg.innerHTML = _progressOverlayHTML(item);
+  }
 }
 
 /* ===== CARD GRID with year-shelf dividers =====
@@ -318,6 +338,36 @@ function renderGrid(items, isSearch, offset = 0) {
   });
 }
 
+/* ===== READING PROGRESS RING HTML (UX-03) ===== */
+function _progressOverlayHTML(item) {
+  const prog = D.getProgress ? D.getProgress(item.id) : null;
+  if (!prog || prog.pct < 3) return '';
+  if (prog.done) {
+    return '<div class="lib-card-done-badge" title="Read">' +
+      '<svg width="10" height="10" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M2 6l3 3 5-5"/></svg>' +
+      '</div>';
+  }
+  const circum = 2 * Math.PI * 11; // r=11
+  const offset = circum * (1 - prog.pct / 100);
+  return '<svg class="lib-card-progress-ring" viewBox="0 0 28 28" aria-hidden="true">' +
+    '<circle class="ring-bg" r="11" cx="14" cy="14"/>' +
+    '<circle class="ring-fg" r="11" cx="14" cy="14"' +
+    ' style="stroke-dashoffset:' + offset.toFixed(1) + '"/>' +
+    '</svg>';
+}
+
+/* ===== NEW-SINCE DOT (FG-11) ===== */
+let _newSinceDate = null;
+
+function setNewSinceDate(isoDate) {
+  _newSinceDate = isoDate ? new Date(isoDate) : null;
+}
+
+function _isNewItem(item) {
+  if (!_newSinceDate || !item.date) return false;
+  try { return new Date(item.date) > _newSinceDate; } catch (_) { return false; }
+}
+
 function cardHTML(item, idx, isSearch) {
   const isUser = item.source === 'user';
   const meta = D.collMeta(item.collection);
@@ -337,15 +387,25 @@ function cardHTML(item, idx, isSearch) {
       '</button>'
     : '';
 
+  const isNew = !isUser && _isNewItem(item);
+  const newBadge = isNew ? '<div class="lib-card-new-badge">New</div>' : '';
+  const progressOverlay = _progressOverlayHTML(item);
+
   let coverHTML;
   if (url && !isUser) {
+    // UX-19: skeleton shimmer class on cover; onload removes it; onerror shows spine tile
     coverHTML =
-      '<div class="lib-card-cover">' +
-        '<img src="' + D.escHtml(url) + '" alt="' + D.escHtml(item.title) + '" loading="lazy"' +
-          ' onerror="this.style.display=\'none\';this.nextElementSibling.style.display=\'flex\'">' +
+      '<div class="lib-card-cover lib-cover-loading" id="lib-cv-' + D.escHtml(item.id) + '">' +
+        '<img src="' + D.escHtml(url) + '" alt="' + D.escHtml(item.title) + '" loading="lazy" class="lib-img-loading"' +
+          ' onload="this.classList.remove(\'lib-img-loading\');this.classList.add(\'lib-img-loaded\');' +
+          'var p=this.parentNode;if(p)p.classList.remove(\'lib-cover-loading\')"' +
+          ' onerror="this.style.display=\'none\';this.nextElementSibling.style.display=\'flex\';' +
+          'var p=this.parentNode;if(p)p.classList.remove(\'lib-cover-loading\')">' +
         '<div class="lib-card-spine" style="display:none"><span class="lib-spine-bar"></span>' +
           '<span class="lib-spine-text">' + D.escHtml(item.title) + '</span></div>' +
         (item.locked ? '<div class="lib-card-locked-overlay"><div class="lib-lock-icon">&#x1F512;</div></div>' : '') +
+        newBadge +
+        progressOverlay +
         '<span class="lib-card-chip">' + D.escHtml(meta.label) + '</span>' +
       '</div>';
   } else {
@@ -358,6 +418,8 @@ function cardHTML(item, idx, isSearch) {
           '<span class="lib-spine-text">' + D.escHtml(item.title) + '</span>' +
         '</div>' +
         (item.locked ? '<div class="lib-card-locked-overlay"><div class="lib-lock-icon">&#x1F512;</div></div>' : '') +
+        newBadge +
+        progressOverlay +
         '<span class="lib-card-chip">' + D.escHtml(isUser ? (item.type === 'pdf' ? 'PDF' : 'Write-up') : meta.label) + '</span>' +
       '</div>';
   }
@@ -544,6 +606,98 @@ function renderPreview(item) {
   }
 }
 
+/* ===== CONTINUE READING RAIL (FG-15) ===== */
+function renderContinueRail(allItems) {
+  const rail = document.getElementById('lib-continue-rail');
+  if (!rail) return;
+
+  const prog = D.getAllProgress ? D.getAllProgress() : {};
+  // Find items with 5% < pct < 95%, sorted by most recent ts
+  const inProgress = Object.entries(prog)
+    .filter(([, p]) => p.pct >= 5 && !p.done)
+    .sort((a, b) => (b[1].ts || 0) - (a[1].ts || 0))
+    .slice(0, 5);
+
+  if (!inProgress.length) {
+    rail.classList.remove('show');
+    rail.innerHTML = '';
+    return;
+  }
+
+  // Resolve items
+  const items = inProgress.map(([slug, p]) => {
+    const item = allItems.find(i => i.id === slug);
+    return item ? { item, pct: p.pct } : null;
+  }).filter(Boolean);
+
+  if (!items.length) { rail.classList.remove('show'); return; }
+
+  let html = '<span class="lib-continue-label">Continue</span>';
+  items.forEach(({ item, pct }) => {
+    const fillPct = Math.round(pct);
+    const circum = 69.1; // 2π*11
+    const offset = circum * (1 - fillPct / 100);
+    html +=
+      '<button class="lib-continue-item" data-slug="' + D.escHtml(item.id) + '">' +
+        '<span class="lib-continue-title">' + D.escHtml(item.title) + '</span>' +
+        '<span class="lib-continue-bar-wrap"><span class="lib-continue-bar" style="width:' + fillPct + '%"></span></span>' +
+        '<span class="lib-continue-pct">' + fillPct + '%</span>' +
+      '</button>';
+  });
+  rail.innerHTML = html;
+  rail.classList.add('show');
+
+  // Wire clicks
+  rail.querySelectorAll('.lib-continue-item[data-slug]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const slug = btn.getAttribute('data-slug');
+      const idx = D.filteredItems.findIndex(i => i.id === slug);
+      if (idx >= 0 && window.LibReader) {
+        window.LibReader.open(idx);
+      } else if (window.LibReader) {
+        // Reset filter and try
+        D.state.filter = 'all';
+        D.state.filterLabel = 'All Items';
+        D.getFiltered();
+        const idx2 = D.filteredItems.findIndex(i => i.id === slug);
+        if (idx2 >= 0) window.LibReader.open(idx2);
+      }
+    });
+  });
+}
+
+/* ===== NEW SINCE LAST VISIT BANNER (FG-11) ===== */
+function renderNewSinceBanner(allItems) {
+  const banner = document.getElementById('lib-new-since-banner');
+  if (!banner) return;
+
+  const lastSeen = D.getLastSeen ? D.getLastSeen() : null;
+  if (!lastSeen) {
+    banner.classList.remove('show');
+    return;
+  }
+
+  const lastSeenDate = new Date(lastSeen);
+  const newCount = allItems.filter(i => {
+    if (!i.date || i.source === 'user') return false;
+    try { return new Date(i.date) > lastSeenDate; } catch (_) { return false; }
+  }).length;
+
+  if (!newCount) { banner.classList.remove('show'); return; }
+
+  banner.innerHTML =
+    '<span>' + newCount + ' new article' + (newCount === 1 ? '' : 's') + ' since your last visit</span>' +
+    '<button class="lib-new-since-dismiss" aria-label="Dismiss" title="Dismiss">&times;</button>';
+  banner.classList.add('show');
+
+  const btn = banner.querySelector('.lib-new-since-dismiss');
+  if (btn) {
+    btn.addEventListener('click', () => {
+      banner.classList.remove('show');
+    });
+  }
+}
+
 /* ===== EMPTY STATE ===== */
 function showEmpty(show) {
   const el = document.getElementById('lib-empty');
@@ -626,5 +780,9 @@ return {
   updateSortBtn,
   showToast,
   SORT_CYCLE,
+  // Wave 2b
+  renderContinueRail,
+  renderNewSinceBanner,
+  setNewSinceDate,
 };
 })();

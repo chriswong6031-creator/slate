@@ -13,6 +13,10 @@
 <!-- TOPBAR -->
 <div id="lib-topbar">
   <div class="lib-tb-left">
+    <!-- UX-02: hamburger for mobile sidebar -->
+    <button id="lib-sidebar-toggle" aria-label="Toggle navigation" aria-expanded="false" aria-controls="lib-sidebar">
+      <svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M3 5h14M3 10h14M3 15h14"/></svg>
+    </button>
     <a class="lib-logo-mark" href="index.html" title="Back to Slate" aria-label="Back to Slate">S</a>
     <span class="lib-app-title">Library</span>
     <span class="lib-tb-divider" aria-hidden="true"></span>
@@ -24,9 +28,9 @@
   <div class="lib-tb-center">
     <div class="lib-search-wrap" id="lib-search-wrap">
       <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="7" cy="7" r="4.5"/><path d="M10.5 10.5L14 14"/></svg>
-      <input type="text" id="lib-search-input" placeholder="Search Library…" autocomplete="off" aria-label="Search articles">
+      <!-- UX-15: placeholder shows / hint -->
+      <input type="text" id="lib-search-input" placeholder="Search  (/)" autocomplete="off" aria-label="Search articles — press / to focus">
       <button id="lib-ft-toggle" title="Toggle full-text search" aria-pressed="false">Full text</button>
-      <span class="lib-search-kbd" aria-hidden="true">/</span>
     </div>
   </div>
   <div class="lib-tb-right">
@@ -36,6 +40,9 @@
     </button>
   </div>
 </div>
+
+<!-- UX-02: Sidebar backdrop for mobile -->
+<div id="lib-sidebar-backdrop" aria-hidden="true"></div>
 
 <!-- APP -->
 <div class="lib-app" id="lib-app">
@@ -74,6 +81,13 @@
 
       <!-- GRID MODE -->
       <div id="lib-grid-canvas">
+
+        <!-- FG-11: New since last visit banner -->
+        <div id="lib-new-since-banner" role="status" aria-live="polite"></div>
+
+        <!-- FG-15: Continue reading rail -->
+        <div id="lib-continue-rail" aria-label="Continue reading"></div>
+
         <!-- Hero -->
         <button id="lib-hero" aria-label="Open featured article" style="display:none">
           <div class="lib-hero-cover" id="lib-hero-cover-wrap">
@@ -83,6 +97,7 @@
             </div>
             <img id="lib-hero-img" src="" alt="" style="display:none">
             <span class="lib-hero-badge">Latest</span>
+            <span id="lib-hero-progress"></span>
           </div>
           <div class="lib-hero-body">
             <div>
@@ -155,15 +170,23 @@
       <span class="lib-tb-divider" aria-hidden="true"></span>
       <span class="lib-reader-title-bar" id="lib-reader-title-bar" aria-live="polite"></span>
     </div>
-    <div class="lib-reader-pager">
-      <button class="lib-page-btn" id="lib-prev-btn" disabled aria-label="Previous article">
-        <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M10 3L4 8l6 5"/></svg>
-        Previous
-      </button>
-      <button class="lib-page-btn" id="lib-next-btn" aria-label="Next article">
-        Next
-        <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M6 3l6 5-6 5"/></svg>
-      </button>
+    <div style="display:flex;align-items:center;gap:8px">
+      <!-- FG-20: Font size controls -->
+      <div class="lib-reader-font-controls" id="lib-font-controls" aria-label="Font size">
+        <button class="lib-font-btn lib-font-btn-sm" data-action="smaller" title="Smaller text" aria-label="Decrease font size">A−</button>
+        <button class="lib-font-btn lib-font-btn-md" data-action="reset" title="Reset font size" aria-label="Reset font size">A</button>
+        <button class="lib-font-btn lib-font-btn-lg" data-action="larger" title="Larger text" aria-label="Increase font size">A+</button>
+      </div>
+      <div class="lib-reader-pager">
+        <button class="lib-page-btn" id="lib-prev-btn" disabled aria-label="Previous article">
+          <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M10 3L4 8l6 5"/></svg>
+          Previous
+        </button>
+        <button class="lib-page-btn" id="lib-next-btn" aria-label="Next article">
+          Next
+          <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M6 3l6 5-6 5"/></svg>
+        </button>
+      </div>
     </div>
   </div>
 
@@ -232,6 +255,7 @@ const R = window.LibReader;
 
 let sortCycleIdx = 0;
 let ftSnippets = new Map();
+let _allItemsForRails = []; // kept in sync with filteredItems for rails
 
 /* ===== FILTER ===== */
 function applyFilter(filter, label) {
@@ -265,10 +289,22 @@ function handleSearch(q) {
 function renderAll() {
   const isSearch = !!D.state.search;
   const items = D.getFiltered(ftSnippets);
+  _allItemsForRails = D.allItems.concat(D._userNormItems || []);
   V.setSnippets(ftSnippets);
 
   V.updateToolbar(items, D.state.filterLabel);
   V.syncSidebarActive(D.state.filter);
+
+  // Wave 2b: rails (only show on all-items grid, not search/filtered)
+  if (!isSearch && D.state.filter === 'all') {
+    V.renderContinueRail(_allItemsForRails);
+    V.renderNewSinceBanner(_allItemsForRails);
+  } else {
+    const rail = document.getElementById('lib-continue-rail');
+    if (rail) rail.classList.remove('show');
+    const banner = document.getElementById('lib-new-since-banner');
+    if (banner) banner.classList.remove('show');
+  }
 
   if (D.state.view === 'grid') {
     const hero = document.getElementById('lib-hero');
@@ -343,6 +379,10 @@ async function init() {
   const si = document.getElementById('lib-search-input');
   si.addEventListener('input', e => handleSearch(e.target.value));
 
+  // UX-15: '/' focuses search from any non-input context (also handled in R.initKeyboard but ensure it works here)
+  // The reader keyboard handler already wires '/' — this ensures it fires on the lib page too.
+  // (R.initKeyboard wires it, but we confirm the placeholder already contains the hint)
+
   // Full-text toggle
   const ftBtn = document.getElementById('lib-ft-toggle');
   ftBtn.addEventListener('click', () => {
@@ -366,6 +406,48 @@ async function init() {
     if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); if (D.filteredItems.length) R.open(0); }
   });
 
+  // UX-02: Hamburger / sidebar sheet
+  const sidebarToggle = document.getElementById('lib-sidebar-toggle');
+  const sidebarBackdrop = document.getElementById('lib-sidebar-backdrop');
+  const sidebar = document.getElementById('lib-sidebar');
+
+  function openSidebar() {
+    sidebar.classList.add('open');
+    sidebarBackdrop.classList.add('show');
+    sidebarToggle.setAttribute('aria-expanded', 'true');
+    document.body.style.overflow = 'hidden';
+  }
+  function closeSidebar() {
+    sidebar.classList.remove('open');
+    sidebarBackdrop.classList.remove('show');
+    sidebarToggle.setAttribute('aria-expanded', 'false');
+    document.body.style.overflow = '';
+  }
+
+  if (sidebarToggle) {
+    sidebarToggle.addEventListener('click', () => {
+      if (sidebar.classList.contains('open')) closeSidebar();
+      else openSidebar();
+    });
+  }
+  if (sidebarBackdrop) {
+    sidebarBackdrop.addEventListener('click', closeSidebar);
+  }
+  // Close sidebar on filter selection on mobile
+  if (sidebar) {
+    sidebar.addEventListener('click', e => {
+      if (e.target.closest('[data-filter]') || e.target.closest('#lib-sb-new-post')) {
+        if (window.innerWidth <= 700) closeSidebar();
+      }
+    });
+  }
+  // Close on Escape
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape' && sidebar && sidebar.classList.contains('open')) {
+      closeSidebar();
+    }
+  });
+
   // C7: Load manifest and user items independently so a manifest failure never
   // prevents the user's own local IDB content from rendering.
   const U = window.LibUser;
@@ -383,6 +465,10 @@ async function init() {
   // 2. Citrini manifest (network-dependent; degrade gracefully to an error notice)
   let manifestErr = null;
   try {
+    // FG-11: capture lastSeen BEFORE loading so we can compare dates on this render
+    const lastSeenBeforeLoad = D.getLastSeen ? D.getLastSeen() : null;
+    if (V.setNewSinceDate) V.setNewSinceDate(lastSeenBeforeLoad);
+
     await D.loadManifest();
     // Clear any stale offline notice from a previous failed load
     const slot = document.getElementById('lib-notice-slot');
@@ -406,6 +492,9 @@ async function init() {
   // Always render the grid first so closing a deep-linked reader (Esc/back)
   // returns to a populated library, then let the hash route open on top.
   renderAll();
+
+  // FG-11: write lastSeen AFTER first successful render (manifest loaded)
+  if (!manifestErr && D.writeLastSeen) D.writeLastSeen();
 
   if (!manifestErr) {
     await R.handleHashRoute();

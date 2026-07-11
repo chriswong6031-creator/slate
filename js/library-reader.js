@@ -42,9 +42,12 @@ async function open(idx) {
   if (prevBtn) prevBtn.disabled = idx <= 0;
   if (nextBtn) nextBtn.disabled = idx >= D.filteredItems.length - 1;
 
-  // Scroll to top
+  // Scroll to top (will be overridden by progress restore for returning readers)
   const scroll = document.getElementById('lib-reader-scroll');
   if (scroll) scroll.scrollTop = 0;
+
+  // Apply persisted font size
+  _applyFontSize(D.getReaderPrefs().fontSize);
 
   // Reset progress bar
   const bar = document.getElementById('lib-read-progress');
@@ -88,13 +91,163 @@ async function open(idx) {
       });
     }
     _buildTOC(bodyEl);
-    _initProgress(scroll, bodyEl);
+    _initClipPill(bodyEl, item);
+    _initProgress(scroll, bodyEl, item.id);
+    _restoreProgress(scroll, item.id);
   } catch (e) {
     if (_openGeneration !== myGen) return;
     if (bodyEl) {
       bodyEl.innerHTML = '<p style="color:var(--danger)">Could not load article: ' + D.escHtml(e.message) + '</p>';
     }
   }
+}
+
+/* ===== CLIP TO BRAIN PILL (FG-02) ===== */
+const INBOX_KEY = 'slate.brain.inbox.v1';
+
+let _clipPillDismissListener = null;
+let _clipMouseupListener = null;
+let _clipBodyRef = null;
+
+function _initClipPill(bodyEl, item) {
+  // Clean up any previous listeners
+  _teardownClipPill();
+  if (!bodyEl) return;
+  _clipBodyRef = bodyEl;
+
+  const pill = _getOrCreatePill();
+
+  function _onMouseup(e) {
+    // Small delay so selection is settled
+    setTimeout(() => {
+      const sel = window.getSelection();
+      const text = sel ? sel.toString().trim() : '';
+      if (text.length < 10) {
+        pill.classList.remove('show');
+        return;
+      }
+
+      // Position near selection bounding rect
+      try {
+        const range = sel.getRangeAt(0);
+        const rect = range.getBoundingClientRect();
+        const pillW = 160; // approximate
+        const left = Math.min(
+          window.innerWidth - pillW - 8,
+          Math.max(8, rect.left + rect.width / 2 - pillW / 2)
+        );
+        const top = Math.max(8, rect.top - 44 + window.scrollY);
+        pill.style.left = left + 'px';
+        pill.style.top = top + 'px';
+        pill.style.position = 'fixed';
+        // Recompute: use fixed positioning with viewport coords
+        pill.style.left = Math.min(window.innerWidth - pillW - 8, Math.max(8, rect.left + rect.width / 2 - pillW / 2)) + 'px';
+        pill.style.top = Math.max(8, rect.top - 44) + 'px';
+      } catch (_) {}
+
+      pill.classList.add('show');
+
+      // Wire click for this selection
+      pill.onclick = () => {
+        _writeToInbox(text, item);
+        pill.classList.remove('show');
+        sel && sel.removeAllRanges();
+      };
+    }, 80);
+  }
+
+  function _onDismiss(e) {
+    if (!e.target.closest('#lib-clip-pill')) {
+      pill.classList.remove('show');
+    }
+  }
+
+  bodyEl.addEventListener('mouseup', _onMouseup);
+  document.addEventListener('mousedown', _onDismiss);
+  _clipMouseupListener = _onMouseup;
+  _clipDismissListener = _onDismiss;
+}
+
+let _clipDismissListener = null;
+
+function _teardownClipPill() {
+  const pill = document.getElementById('lib-clip-pill');
+  if (pill) { pill.classList.remove('show'); pill.onclick = null; }
+  if (_clipBodyRef && _clipMouseupListener) {
+    _clipBodyRef.removeEventListener('mouseup', _clipMouseupListener);
+    _clipMouseupListener = null;
+  }
+  if (_clipDismissListener) {
+    document.removeEventListener('mousedown', _clipDismissListener);
+    _clipDismissListener = null;
+  }
+  _clipBodyRef = null;
+}
+
+function _getOrCreatePill() {
+  let pill = document.getElementById('lib-clip-pill');
+  if (!pill) {
+    pill = document.createElement('button');
+    pill.id = 'lib-clip-pill';
+    pill.setAttribute('aria-label', 'Clip to Brain');
+    pill.innerHTML =
+      '<svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">' +
+        '<path d="M12 2l2 2L6 12H4v-2L12 2z"/>' +
+      '</svg> Clip to Brain';
+    document.body.appendChild(pill);
+  }
+  return pill;
+}
+
+function _writeToInbox(text, item) {
+  const sourceTitle = item ? item.title : (document.getElementById('lib-article-title') || {}).textContent || 'Library';
+  const sourceUrl = item ? (item.original_url || (location.origin + location.pathname + '#/read/' + encodeURIComponent(item.id))) : location.href;
+
+  try {
+    const raw = localStorage.getItem(INBOX_KEY);
+    const queue = raw ? JSON.parse(raw) : [];
+    queue.push({ text, sourceTitle, sourceUrl, ts: Date.now() });
+    localStorage.setItem(INBOX_KEY, JSON.stringify(queue));
+  } catch (_) {}
+
+  // Toast confirmation
+  if (window.LibUser && window.LibUser.showLibToast) {
+    window.LibUser.showLibToast('Clipped — will file to Brain', 2500);
+  }
+}
+
+/* ===== FONT SIZE CONTROLS (FG-20) ===== */
+const FONT_MIN = 13;
+const FONT_MAX = 24;
+const FONT_STEP = 2;
+
+function _applyFontSize(size) {
+  const body = document.getElementById('lib-article-body');
+  if (body) body.style.fontSize = size + 'px';
+}
+
+function _initFontControls() {
+  const container = document.getElementById('lib-font-controls');
+  if (!container) return;
+
+  // Already wired
+  if (container.dataset.wired) return;
+  container.dataset.wired = '1';
+
+  const prefs = D.getReaderPrefs();
+
+  container.addEventListener('click', e => {
+    const btn = e.target.closest('.lib-font-btn');
+    if (!btn) return;
+    const action = btn.dataset.action;
+    const p = D.getReaderPrefs();
+    let size = p.fontSize || 16;
+    if (action === 'smaller') size = Math.max(FONT_MIN, size - FONT_STEP);
+    else if (action === 'larger') size = Math.min(FONT_MAX, size + FONT_STEP);
+    else size = 16; // reset
+    _applyFontSize(size);
+    D.saveReaderPrefs({ ...p, fontSize: size });
+  });
 }
 
 /* ===== USER WRITEUP RENDER ===== */
@@ -122,8 +275,11 @@ function _renderUserWriteup(item, scroll) {
     bodyEl.innerHTML = '<p style="color:var(--ink-3);font-style:italic">No content yet.</p>';
   }
 
+  const _curItem = D.filteredItems[D.readerIdx]; // may be undefined for static call
   _buildTOC(bodyEl);
-  _initProgress(scroll, bodyEl);
+  _initClipPill(bodyEl, null);
+  _initProgress(scroll, bodyEl, _curItem ? _curItem.id : null);
+  if (_curItem) _restoreProgress(scroll, _curItem.id);
 }
 
 /* ===== USER PDF RENDER ===== */
@@ -258,9 +414,11 @@ function _updateReaderUserControls(item, isUser) {
       ' Delete' +
     '</button>';
 
-  // Insert before the pager
+  // Insert before the pager (pager may be nested inside a flex wrapper, not a direct
+  // child of topbar — use pager's actual parent so insertBefore doesn't throw)
   const pager = topbar.querySelector('.lib-reader-pager');
-  topbar.insertBefore(bar, pager);
+  const pagerParent = pager ? pager.parentNode : topbar;
+  pagerParent.insertBefore(bar, pager);
 
   // Wire Edit
   document.getElementById('lib-reader-edit-btn').addEventListener('click', () => {
@@ -299,6 +457,12 @@ function close() {
   // Remove user controls bar
   const uc = document.getElementById('lib-reader-user-controls');
   if (uc) uc.remove();
+
+  // Teardown clip pill
+  _teardownClipPill();
+
+  // Flush any pending progress write
+  clearTimeout(_progressThrottle);
 
   // Reset hash to grid
   D.pushHash('');
@@ -341,17 +505,55 @@ function _buildTOC(bodyEl) {
   }
 }
 
-/* ===== READING PROGRESS BAR ===== */
-function _initProgress(scroll, bodyEl) {
+/* ===== READING PROGRESS BAR + SAVE (UX-03 / FG-01) ===== */
+let _progressSlug = null;
+let _progressThrottle = null;
+let _progressScrollListener = null; // track current listener for clean removal
+
+function _initProgress(scroll, bodyEl, slug) {
   if (!scroll || !bodyEl) return;
   const bar = document.getElementById('lib-read-progress');
   if (!bar) return;
-  scroll.addEventListener('scroll', () => {
+
+  // Remove any existing scroll listener before adding a new one
+  if (_progressScrollListener) {
+    // We stored the element reference too so we can remove exactly
+    try { scroll.removeEventListener('scroll', _progressScrollListener, { passive: true }); } catch (_) {}
+    _progressScrollListener = null;
+  }
+
+  // Remember which article this progress handler is for
+  _progressSlug = slug || null;
+
+  function update() {
     const total = scroll.scrollHeight - scroll.clientHeight;
     if (total <= 0) { bar.style.width = '100%'; return; }
     const pct = Math.min(100, (scroll.scrollTop / total) * 100);
     bar.style.width = pct + '%';
-  }, { passive: true });
+
+    // Throttle write to ≤1/s
+    if (_progressSlug) {
+      clearTimeout(_progressThrottle);
+      _progressThrottle = setTimeout(() => {
+        D.saveProgress(_progressSlug, Math.round(pct), scroll.scrollTop);
+      }, 1000);
+    }
+  }
+
+  _progressScrollListener = update;
+  scroll.addEventListener('scroll', update, { passive: true });
+}
+
+/* Restore scroll position for an already-open article */
+function _restoreProgress(scroll, slug) {
+  if (!slug || !scroll) return;
+  const prog = D.getProgress(slug);
+  if (!prog || !prog.scrollY) return;
+
+  // Restore after a rAF so layout is settled
+  requestAnimationFrame(() => {
+    scroll.scrollTop = prog.scrollY;
+  });
 }
 
 /* ===== KEYBOARD ===== */
@@ -433,6 +635,9 @@ function initNavButtons() {
   if (nextBtn) nextBtn.addEventListener('click', () => { if (D.readerIdx < D.filteredItems.length - 1) open(D.readerIdx + 1); });
   const backBtn = document.getElementById('lib-reader-back');
   if (backBtn) backBtn.addEventListener('click', close);
+
+  // Wire font size controls (FG-20)
+  _initFontControls();
 }
 
 /* Expose D.collMeta for header render */

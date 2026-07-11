@@ -264,6 +264,47 @@ function toggleTheme() {
   applyTheme(cur === 'dark' ? 'light' : 'dark');
 }
 
+/* ===== READING PROGRESS STORE (UX-03 / FG-01 / FG-15) ===== */
+const PROGRESS_KEY = 'slate.library.progress.v1';  // {slug: {pct, scrollY, ts, done}}
+const LAST_SEEN_KEY = 'slate.library.lastSeen.v1'; // ISO timestamp
+const READER_PREFS_KEY = 'slate.library.reader.prefs'; // {fontSize}
+
+function _readProgress() {
+  try { return JSON.parse(localStorage.getItem(PROGRESS_KEY) || '{}'); } catch (_) { return {}; }
+}
+
+function saveProgress(slug, pct, scrollY) {
+  try {
+    const prog = _readProgress();
+    prog[slug] = { pct, scrollY, ts: Date.now(), done: pct >= 95 };
+    localStorage.setItem(PROGRESS_KEY, JSON.stringify(prog));
+  } catch (_) {}
+}
+
+function getProgress(slug) {
+  return _readProgress()[slug] || null;
+}
+
+function getAllProgress() {
+  return _readProgress();
+}
+
+function getReaderPrefs() {
+  try { return JSON.parse(localStorage.getItem(READER_PREFS_KEY) || '{"fontSize":16}'); } catch (_) { return { fontSize: 16 }; }
+}
+
+function saveReaderPrefs(prefs) {
+  try { localStorage.setItem(READER_PREFS_KEY, JSON.stringify(prefs)); } catch (_) {}
+}
+
+function getLastSeen() {
+  return localStorage.getItem(LAST_SEEN_KEY) || null;
+}
+
+function writeLastSeen() {
+  try { localStorage.setItem(LAST_SEEN_KEY, new Date().toISOString()); } catch (_) {}
+}
+
 /* ===== COVER URL HELPER ===== */
 function coverUrl(item) {
   if (!item || !item.cover) return null;
@@ -321,6 +362,20 @@ return {
   pushHash,
   parseHash,
   findItemBySlug,
+
+  // Reading progress / prefs / last-seen (wave 2b)
+  saveProgress,
+  getProgress,
+  getAllProgress,
+  getReaderPrefs,
+  saveReaderPrefs,
+  getLastSeen,
+  writeLastSeen,
+
+  // Keys exposed for consumers
+  PROGRESS_KEY,
+  LAST_SEEN_KEY,
+  READER_PREFS_KEY,
 
   // User items support
   _setUserItems,
