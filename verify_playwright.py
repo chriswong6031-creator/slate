@@ -1017,6 +1017,146 @@ with sync_playwright() as pw:
     p_ol.keyboard.press("Escape")
     ctx_ol.close()
 
+    # ── FINDING 1: printNote XSS — title with <img onerror> must not execute in print window ──
+    # Test (a): stub window.open to capture written HTML; assert payload is escaped
+    ctx_pn = browser.new_context(viewport={"width": 1440, "height": 900})
+    p_pn = ctx_pn.new_page()
+    p_pn.goto(BASE)
+    p_pn.wait_for_timeout(400)
+    p_pn.locator("#viewSeg .seg-btn[data-view='brain']").click()
+    p_pn.wait_for_timeout(300)
+    # Seed a note whose title is an XSS payload; also seed a body XSS line
+    p_pn.evaluate(
+        "() => { const cat = state.brain.categories[0];"
+        " cat.notes.push({id:'pn-xss',title:'<img src=x onerror=parent.__PF__=true>',"
+        "  text:'safe line\\n<img src=x onerror=parent.__PF2__=true>',created:Date.now()});"
+        " save(); }")
+    # Navigate into the shelf and open the note
+    p_pn.locator(".bi-cat-row").first.click()
+    p_pn.wait_for_timeout(300)
+    p_pn.locator(".bc-note-entry[data-note-id='pn-xss']").click()
+    p_pn.wait_for_timeout(300)
+    # Stub window.open to return a fake document that captures written HTML
+    captured_html = p_pn.evaluate("""() => {
+        let written = '';
+        const fakeDoc = {
+            write: (s) => { written += s; },
+            close: () => {},
+        };
+        const fakeWin = { document: fakeDoc, focus: () => {}, print: () => {} };
+        const orig = window.open;
+        window.open = () => fakeWin;
+        // Find the note and call printNote
+        let found = null;
+        for (const cat of state.brain.categories)
+            for (const n of cat.notes) if (n.id === 'pn-xss') { found = n; break; }
+        if (!found) return 'NOTE_NOT_FOUND';
+        printNote(found);
+        window.open = orig;
+        return written;
+    }""")
+    # The raw payload must not appear unescaped; &lt; must appear instead of <
+    pn_has_raw_tag = '<img src=x onerror=' in captured_html
+    pn_has_escaped = '&lt;img' in captured_html
+    check("finding1: printNote title — raw <img> tag absent in print HTML", not pn_has_raw_tag,
+          captured_html[:300] if pn_has_raw_tag else "")
+    check("finding1: printNote title — payload is HTML-escaped", pn_has_escaped,
+          captured_html[:300])
+    # Canary: the onerror must not have fired
+    canary_fired = p_pn.evaluate("() => !!window.__PF__")
+    check("finding1: printNote XSS canary did not fire", not canary_fired,
+          f"__PF__={canary_fired}")
+    ctx_pn.close()
+
+    # Test (b): inbox-clip → Clippings note → print is also safe
+    ctx_pn2 = browser.new_context(viewport={"width": 1440, "height": 900})
+    ctx_pn2.add_init_script(
+        "localStorage.setItem('slate.brain.inbox.v1', "
+        "JSON.stringify([{text:'<img src=x onerror=window.__PF3__=true> clip payload',"
+        "sourceTitle:'Test',sourceUrl:'https://x.com',ts:Date.now()}]))")
+    p_pn2 = ctx_pn2.new_page()
+    p_pn2.goto(BASE)
+    p_pn2.wait_for_timeout(700)
+    clip_print_html = p_pn2.evaluate("""() => {
+        let written = '';
+        const fakeDoc = { write: (s) => { written += s; }, close: () => {} };
+        const fakeWin = { document: fakeDoc, focus: () => {}, print: () => {} };
+        const orig = window.open;
+        window.open = () => fakeWin;
+        // Find the Clippings note
+        const cat = state.brain.categories.find(c => c.name === 'Clippings');
+        if (!cat || !cat.notes.length) return 'NO_CLIP';
+        printNote(cat.notes[0]);
+        window.open = orig;
+        return written;
+    }""")
+    clip_has_raw = '<img src=x onerror=' in (clip_print_html or '')
+    check("finding1: inbox-clip printNote — raw <img> tag absent", not clip_has_raw,
+          (clip_print_html or '')[:200] if clip_has_raw else "")
+    ctx_pn2.close()
+
+    # ── FINDING 2: trash purge must persist to localStorage ──
+    ctx_tp = browser.new_context(viewport={"width": 1440, "height": 900})
+    # Pre-seed state with a trash entry whose deletedAt is 31 days ago
+    import json as _json
+    ms_31d_ago = int(__import__('time').time() * 1000) - 31 * 24 * 60 * 60 * 1000
+    seed_state = {
+        "v": 1, "theme": "light", "view": "brain", "activeWs": "w1",
+        "ws": [{"id": "w1", "name": "Personal", "scroll": {"x": 0, "y": 0}, "boards": []}],
+        "brain": {
+            "categories": [{"id": "c1", "name": "Test", "notes": []}],
+            "trash": [{"note": {"id": "stale-n", "text": "SECRET_BODY", "created": ms_31d_ago},
+                       "catName": "Test", "catId": "c1", "deletedAt": ms_31d_ago}]
+        }
+    }
+    ctx_tp.add_init_script(
+        "localStorage.setItem('slate.state.v1', " + _json.dumps(_json.dumps(seed_state)) + ")")
+    p_tp = ctx_tp.new_page()
+    p_tp.goto(BASE)
+    p_tp.wait_for_timeout(800)  # allow purgeExpiredTrash setTimeout(0) to fire + saveNow
+    # The trash entry should be gone from state
+    trash_count = p_tp.evaluate("() => (state.brain.trash || []).length")
+    check("finding2: purgeExpiredTrash removes entry from in-memory state", trash_count == 0,
+          f"trash count={trash_count}")
+    # Crucially, it must also be gone from localStorage — reload and check
+    ls_raw = p_tp.evaluate("() => localStorage.getItem('slate.state.v1')")
+    ls_body_present = 'SECRET_BODY' in (ls_raw or '')
+    check("finding2: purge persisted — purged note body absent from localStorage",
+          not ls_body_present, (ls_raw or '')[:300] if ls_body_present else "")
+    ctx_tp.close()
+
+    # ── FINDING 3: wikilink autocomplete to long-first-line note resolves (non-dangling) ──
+    ctx_wl = browser.new_context(viewport={"width": 1440, "height": 900})
+    p_wl = ctx_wl.new_page()
+    p_wl.goto(BASE)
+    p_wl.wait_for_timeout(400)
+    p_wl.locator("#viewSeg .seg-btn[data-view='brain']").click()
+    p_wl.wait_for_timeout(300)
+    # Seed a note with no explicit title and a first line > 80 chars
+    long_first_line = "A" * 85  # 85 chars — exceeds the 80-char threshold
+    p_wl.evaluate(
+        "() => { const cat = state.brain.categories[0];"
+        " cat.notes.push({id:'wl-long',text:'" + long_first_line + "\\nSecond line content',"
+        "  created:Date.now()}); save(); }")
+    # noteTitle() for this note returns slice(0,80) + '…' (85 chars → truncated)
+    expected_truncated = long_first_line[:80] + '…'
+    expected_match_key = long_first_line[:80]  # resolver matches against slice-80 without ellipsis
+    # Verify resolver strips trailing '…' and finds the note
+    resolved = p_wl.evaluate(
+        "() => { const resolver = buildNoteLinkResolver();"
+        " return resolver('" + expected_truncated + "'); }")
+    check("finding3: wikilink resolver strips trailing ellipsis and resolves long-title note",
+          resolved is not None and resolved.startswith('#brain-note-'),
+          f"resolved={resolved!r}")
+    # Also verify that the plain slice-80 (no ellipsis) still resolves (regression guard)
+    resolved_plain = p_wl.evaluate(
+        "() => { const resolver = buildNoteLinkResolver();"
+        " return resolver('" + expected_match_key + "'); }")
+    check("finding3: wikilink resolver also resolves slice-80 key without ellipsis",
+          resolved_plain is not None and resolved_plain.startswith('#brain-note-'),
+          f"resolved_plain={resolved_plain!r}")
+    ctx_wl.close()
+
     browser.close()
 
 fails = [r for r in results if not r[1]]

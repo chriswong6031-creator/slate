@@ -18,6 +18,16 @@ let brainEditorMode = 'edit'; // 'edit' | 'preview' — starts in edit; Esc togg
 // notes just created this session open in edit mode; re-visited notes open in preview
 let _justCreatedNoteIds = new Set();
 
+/* ─── HTML ESCAPE HELPER (used by printNote to prevent XSS via note titles/bodies) ─── */
+function brainEscHtml(s) {
+  return String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 /* ─── CONSTANTS ─── */
 const ALL_NOTES_ID = '__all__';
 const TRASH_CAT_ID = '__trash__';
@@ -101,7 +111,9 @@ function buildNoteLinkResolver() {
   // Returns a function: rawTitle → '#' style anchor or null
   // We navigate by title match; no real hrefs needed — click handler intercepts
   return function(rawTitle) {
-    const lower = rawTitle.toLowerCase();
+    // Strip trailing ellipsis so autocomplete-inserted titles (which may carry '…'
+    // from noteTitle()) still resolve against the slice-80 stored key.
+    const lower = rawTitle.replace(/…$/, '').toLowerCase();
     for (const cat of state.brain.categories) {
       for (const n of cat.notes) {
         const t = (n.title && n.title.trim()) ? n.title.trim() : n.text.split('\n')[0].slice(0, 80);
@@ -137,7 +149,10 @@ function purgeExpiredTrash() {
   if (!state || !state.brain) return;
   if (!state.brain.trash) return;
   const cutoff = Date.now() - 30 * 24 * 60 * 60 * 1000;
+  const before = state.brain.trash.length;
   state.brain.trash = state.brain.trash.filter(e => e.deletedAt > cutoff);
+  // Persist the purge so deleted note bodies don't linger in localStorage
+  if (state.brain.trash.length < before) saveNow();
 }
 
 /* ─── INBOX DRAIN ─── */
@@ -866,7 +881,8 @@ function renderBrainEditor() {
           e.preventDefault();
           const title = a.dataset.wikilink;
           if (!title) return;
-          const lower = title.toLowerCase();
+          // Strip trailing ellipsis so links autocompleted from long-first-line titles resolve
+          const lower = title.replace(/…$/, '').toLowerCase();
           for (const cat of state.brain.categories) {
             for (const n of cat.notes) {
               const t = (n.title && n.title.trim()) ? n.title.trim() : n.text.split('\n')[0].slice(0, 80);
@@ -979,14 +995,17 @@ function editorFlushIfDirty() {
 function printNote(note) {
   // build a temporary printable div
   const title = noteTitle(note);
+  const escapedTitle = brainEscHtml(title);
+  // Use the same safe renderMd pipeline used for preview; fall back to per-line escaped <p> tags.
+  // brainEscHtml is applied to every line in the fallback to prevent XSS via note body.
   const htmlBody = (typeof renderMd === 'function')
     ? renderNoteMarkdown(note)
-    : note.text.split('\n').map(l => '<p>' + l + '</p>').join('');
+    : note.text.split('\n').map(l => '<p>' + brainEscHtml(l) + '</p>').join('');
 
   const printWin = window.open('', '_blank', 'width=800,height=600');
   if (!printWin) { window.print(); return; }
   printWin.document.write(
-    '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>' + title + '</title>' +
+    '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>' + escapedTitle + '</title>' +
     '<style>body{font:16px/1.6 Georgia,serif;max-width:680px;margin:40px auto;padding:0 20px;}' +
     'h3,h4,h5{margin:1.2em 0 .3em;}pre{background:#f5f5f5;padding:12px;border-radius:4px;overflow-x:auto;}' +
     'code{background:#f0f0f0;padding:2px 5px;border-radius:3px;}' +
@@ -995,7 +1014,7 @@ function printNote(note) {
     '.print-title{font-size:24px;font-weight:700;margin-bottom:4px;}' +
     '.print-meta{color:#888;font-size:13px;margin-bottom:24px;border-bottom:1px solid #eee;padding-bottom:12px;}' +
     '</style></head><body>' +
-    '<div class="print-title">' + title + '</div>' +
+    '<div class="print-title">' + escapedTitle + '</div>' +
     '<div class="print-meta">Brain note · ' + new Date(note.created).toLocaleDateString() + '</div>' +
     (htmlBody || '<p><em>No content</em></p>') +
     '</body></html>'
