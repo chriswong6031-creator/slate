@@ -3,7 +3,7 @@
    any source change produces a new cache and an immediate takeover. */
 'use strict';
 
-const VERSION = 'slate-33ba9a0df1';
+const VERSION = 'slate-7c58f18c13';
 const ASSETS = [
   './',
   './index.html',
@@ -15,6 +15,7 @@ const ASSETS = [
   './js/render.js',
   './js/interact.js',
   './js/ui.js',
+  './js/markdown.js',
   './js/brain.js',
   './js/palette.js',
   './js/backup-db.js',

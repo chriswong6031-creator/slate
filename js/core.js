@@ -115,6 +115,8 @@ function migrateState(s) {
   if (!s.brain || !Array.isArray(s.brain.categories)) {
     s.brain = { categories: [] };
   }
+  // w2a: trash array (soft-deleted notes)
+  if (!Array.isArray(s.brain.trash)) s.brain.trash = [];
   s.brain.categories = s.brain.categories
     .filter(c => c && typeof c === 'object' && !Array.isArray(c))
     .map(c => ({
@@ -129,8 +131,14 @@ function migrateState(s) {
           // v2: optional title (string) and updated (ms number) — preserved when present
           ...(typeof n.title === 'string' ? { title: n.title } : {}),
           ...(typeof n.updated === 'number' ? { updated: n.updated } : {}),
+          // w2a: optional pinned (boolean) — preserved when present
+          ...(n.pinned === true ? { pinned: true } : {}),
         })),
     }));
+  // w2a: normalize trash entries
+  s.brain.trash = s.brain.trash.filter(
+    e => e && typeof e === 'object' && e.note && typeof e.note.text === 'string'
+  );
   return s;
 }
 

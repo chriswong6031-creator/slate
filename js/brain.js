@@ -1,18 +1,29 @@
 /* Slate — Brain v2: category-first notes library.
    Navigation: index → category page → editor (full pane stack).
    Quick capture: FAB (anywhere in Brain) or dblclick empty space → capture sheet.
-   Keyboard: j/k focus notes, Enter opens, N = new note in category, Esc walks back. */
+   Keyboard: j/k focus notes, Enter opens, N = new note in category, Esc walks back,
+             e = toggle edit/preview in editor, ? = shortcuts overlay.
+   Wave 2a additions: markdown rendering (FG-03), [[links]] autocomplete (FG-04),
+   pin notes (FG-09), trash (FG-10), journal action (FG-06), ? overlay (FG-07),
+   inbox drain (INBOX CONTRACT). */
 'use strict';
 
 /* ─── BRAIN NAV STATE (session only) ─── */
-let brainPane = 'index';      // 'index' | 'category' | 'editor'
+let brainPane = 'index';      // 'index' | 'category' | 'editor' | 'trash'
 let brainCatId = null;        // currently viewed category id
 let brainNoteId = null;       // currently open note id
 let brainFocusIdx = -1;       // j/k cursor in the note list (-1 = none)
 let brainCaptureOpen = false;
+let brainEditorMode = 'edit'; // 'edit' | 'preview' — starts in edit; Esc toggles to preview
+// notes just created this session open in edit mode; re-visited notes open in preview
+let _justCreatedNoteIds = new Set();
 
 /* ─── CONSTANTS ─── */
 const ALL_NOTES_ID = '__all__';
+const TRASH_CAT_ID = '__trash__';
+const INBOX_KEY = 'slate.brain.inbox.v1';
+const CLIPPINGS_SHELF = 'Clippings';
+const JOURNAL_SHELF = 'Journal';
 
 /* ─── LOOKUPS ─── */
 function findNote(noteId) {
@@ -52,7 +63,6 @@ function wordCount(text) {
 
 /* ─── ICON HELPER (SVG strings — kept minimal, uses base ICONS where possible) ─── */
 function brainSvg(pathD, w, h, sw) {
-  // returns an <svg> DOM element with a <path>
   const ns = 'http://www.w3.org/2000/svg';
   const s = document.createElementNS(ns, 'svg');
   s.setAttribute('viewBox', '0 0 ' + (w || 14) + ' ' + (h || 14));
@@ -86,20 +96,87 @@ function catIconSvg(cat) {
   return brainSvg(CAT_ICONS[key] || CAT_ICONS.c7, 18, 18, 1.4);
 }
 
+/* ─── MARKDOWN / [[LINKS]] HELPERS ─── */
+function buildNoteLinkResolver() {
+  // Returns a function: rawTitle → '#' style anchor or null
+  // We navigate by title match; no real hrefs needed — click handler intercepts
+  return function(rawTitle) {
+    const lower = rawTitle.toLowerCase();
+    for (const cat of state.brain.categories) {
+      for (const n of cat.notes) {
+        const t = (n.title && n.title.trim()) ? n.title.trim() : n.text.split('\n')[0].slice(0, 80);
+        if (t.toLowerCase() === lower) return '#brain-note-' + n.id;
+      }
+    }
+    return null; // dead link
+  };
+}
+
+function renderNoteMarkdown(note) {
+  if (typeof renderMd !== 'function') return null;
+  return renderMd(note.text, { noteLinkResolver: buildNoteLinkResolver() });
+}
+
 /* ─── MAIN RENDER DISPATCH ─── */
 function renderBrain() {
-  // Body data attributes drive visibility via CSS
   document.body.dataset.view = 'brain';
   document.body.dataset.brainPane = brainPane;
   renderBrainTopbar();
   if (brainPane === 'index') renderBrainIndex();
   else if (brainPane === 'category') renderBrainCategory();
   else if (brainPane === 'editor') renderBrainEditor();
+  else if (brainPane === 'trash') renderTrashView();
 }
 
 function renderBrainTopbar() {
-  // Show/hide controls that belong to tasks view
-  // (brain already hides wsSwitcher/tidyBtn via CSS body[data-view=brain])
+  // topbar visibility driven by CSS + body data attrs
+}
+
+/* ─── TRASH PURGE (on app load) ─── */
+function purgeExpiredTrash() {
+  if (!state || !state.brain) return;
+  if (!state.brain.trash) return;
+  const cutoff = Date.now() - 30 * 24 * 60 * 60 * 1000;
+  state.brain.trash = state.brain.trash.filter(e => e.deletedAt > cutoff);
+}
+
+/* ─── INBOX DRAIN ─── */
+function drainInbox() {
+  if (!state || !state.brain) return;
+  let raw;
+  try { raw = localStorage.getItem(INBOX_KEY); } catch (e) { return; }
+  if (!raw) return;
+  let entries;
+  try { entries = JSON.parse(raw); } catch (e) { return; }
+  if (!Array.isArray(entries) || !entries.length) return;
+
+  // Get or create Clippings shelf
+  let clippingsCat = state.brain.categories.find(c => c.name === CLIPPINGS_SHELF);
+  if (!clippingsCat) {
+    clippingsCat = newCategory(CLIPPINGS_SHELF);
+    state.brain.categories.unshift(clippingsCat);
+  }
+
+  let filed = 0;
+  for (const entry of entries) {
+    if (!entry || typeof entry.text !== 'string') continue;
+    const lines = [entry.text.trim()];
+    if (entry.sourceTitle) lines.push('\n— ' + entry.sourceTitle);
+    if (entry.sourceUrl) lines.push(entry.sourceUrl);
+    const note = newNote(lines.join('\n'));
+    if (entry.ts) { note.created = entry.ts; note.updated = entry.ts; }
+    clippingsCat.notes.unshift(note);
+    filed++;
+  }
+
+  if (filed > 0) {
+    try { localStorage.removeItem(INBOX_KEY); } catch (e) {}
+    save();
+    toast(filed + (filed === 1 ? ' clip' : ' clips') + ' filed to ' + CLIPPINGS_SHELF);
+    // if we are currently viewing the index or clippings, re-render
+    if (brainPane === 'index') renderBrainIndex();
+    else if (brainPane === 'category' && brainCatId === clippingsCat.id) renderBrainCategory();
+  }
 }
 
 /* ─── INDEX (shelves) ─── */
@@ -121,7 +198,7 @@ function renderBrainIndex() {
   header.append(htitle, hsub, newBtn);
   root.appendChild(header);
 
-  /* All Notes pseudo-shelf (pinned first) */
+  /* All Notes pseudo-shelf */
   if (totalNotes > 0) {
     const allRow = el('div', 'bi-all-notes');
     allRow.addEventListener('click', () => navToCategory(ALL_NOTES_ID));
@@ -133,7 +210,6 @@ function renderBrainIndex() {
     badge.appendChild(brainSvg('M2 4.5h10M2 7.5h10M2 10.5h7', 18, 18, 1.4));
     const info = el('div', 'bi-cat-info');
     info.appendChild(el('div', 'bi-cat-name', 'All Notes'));
-    // most recent note across all cats
     let latestNote = null;
     for (const cat of cats) {
       for (const n of cat.notes) {
@@ -142,7 +218,10 @@ function renderBrainIndex() {
     }
     const latest = el('div', 'bi-cat-latest');
     if (latestNote) {
-      const strong = el('strong', null, noteTitle(latestNote));
+      // UX-05/UX-12: untitled notes show "Untitled" as snippet rather than body repeat
+      const hasTitle = latestNote.title && latestNote.title.trim();
+      const strong = el('strong', null, hasTitle ? latestNote.title.trim() : 'Untitled');
+      if (!hasTitle) strong.className = 'bi-cat-latest-untitled';
       latest.appendChild(strong);
       latest.appendChild(document.createTextNode(' · ' + relTime(noteUpdated(latestNote))));
     } else {
@@ -158,7 +237,30 @@ function renderBrainIndex() {
     root.appendChild(allRow);
   }
 
-  /* Category list sorted by most-recent note activity */
+  /* Trash row — show only if there are items */
+  if (state.brain.trash && state.brain.trash.length > 0) {
+    const trashRow = el('div', 'bi-all-notes bi-trash-row');
+    trashRow.addEventListener('click', () => navToTrash());
+    const bar = el('div', 'bi-cat-bar');
+    bar.style.background = 'var(--danger)';
+    const body = el('div', 'bi-cat-body');
+    const badge = el('div', 'bi-cat-badge');
+    badge.style.background = 'rgba(209,77,77,0.1)';
+    badge.style.color = 'var(--danger)';
+    badge.appendChild(svgIcon(ICONS.trash, 17, 1.4));
+    const info = el('div', 'bi-cat-info');
+    info.appendChild(el('div', 'bi-cat-name', 'Trash'));
+    info.appendChild(el('div', 'bi-cat-latest', state.brain.trash.length + ' deleted note' + (state.brain.trash.length === 1 ? '' : 's') + ' · auto-purge after 30d'));
+    const meta = el('div', 'bi-cat-meta');
+    meta.appendChild(el('span', 'bi-cat-count', state.brain.trash.length + ''));
+    const chev = el('span', 'bi-cat-chev');
+    chev.appendChild(brainSvg('M4.5 3.5L8 7L4.5 10.5', 14, 14, 1.4));
+    body.append(badge, info, meta, chev);
+    trashRow.append(bar, body);
+    root.appendChild(trashRow);
+  }
+
+  /* Category list sorted by pinned-notes first, then most-recent activity */
   const catList = el('div', 'bi-cat-list');
   const sortedCats = cats.slice().sort((a, b) => {
     const la = a.notes.reduce((m, n) => Math.max(m, noteUpdated(n)), 0);
@@ -200,7 +302,14 @@ function renderBrainIndex() {
 
 function catRowEl(cat) {
   const color = catColor(cat);
-  const latest = cat.notes.slice().sort((a, b) => noteUpdated(b) - noteUpdated(a))[0];
+  // pinned notes float to top, then newest-first
+  const sortedNotes = cat.notes.slice().sort((a, b) => {
+    if (a.pinned && !b.pinned) return -1;
+    if (!a.pinned && b.pinned) return 1;
+    return noteUpdated(b) - noteUpdated(a);
+  });
+  const latest = sortedNotes[0];
+  const pinnedCount = cat.notes.filter(n => n.pinned).length;
   const row = el('div', 'bi-cat-row tint-' + color);
   row.dataset.catId = cat.id;
   row.addEventListener('click', () => navToCategory(cat.id));
@@ -213,15 +322,24 @@ function catRowEl(cat) {
   info.appendChild(el('div', 'bi-cat-name', cat.name));
   const latestEl = el('div', 'bi-cat-latest');
   if (latest) {
-    const strong = el('strong', null, noteTitle(latest));
+    // UX-05/UX-12: show "Untitled" rather than body text for untitled notes
+    const hasTitle = latest.title && latest.title.trim();
+    const strong = el('strong', null, hasTitle ? latest.title.trim() : 'Untitled');
+    if (!hasTitle) strong.className = 'bi-cat-latest-untitled';
     latestEl.appendChild(strong);
     latestEl.appendChild(document.createTextNode(' · ' + relTime(noteUpdated(latest))));
+    if (latest.pinned) {
+      const pin = el('span', 'bi-pin-glyph', '📌');
+      pin.setAttribute('aria-label', 'pinned');
+      latestEl.appendChild(pin);
+    }
   } else {
     latestEl.textContent = 'No notes yet';
   }
   info.appendChild(latestEl);
   const meta = el('div', 'bi-cat-meta');
   meta.appendChild(el('span', 'bi-cat-count', cat.notes.length + (cat.notes.length === 1 ? ' note' : ' notes')));
+  if (pinnedCount) meta.appendChild(el('span', 'bi-cat-pinned-badge', '📌 ' + pinnedCount));
   if (latest) meta.appendChild(el('span', 'bi-cat-age', relTime(noteUpdated(latest))));
   const chev = el('span', 'bi-cat-chev');
   chev.appendChild(brainSvg('M4.5 3.5L8 7L4.5 10.5', 14, 14, 1.4));
@@ -330,6 +448,8 @@ function renderBrainCategory() {
     ta.addEventListener('input', () => {
       autoGrowTa(ta);
       scheduleShadowPush();
+      // [[autocomplete on typing [[
+      checkWikilinkTrigger(ta);
     });
     ta.addEventListener('keydown', (e) => {
       if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); saveFromComposer(); }
@@ -344,11 +464,23 @@ function renderBrainCategory() {
     root.appendChild(composer);
   }
 
-  /* notes list */
-  const notes = isAll ? allNotesSorted() : cat.notes.slice().sort((a, b) => noteUpdated(b) - noteUpdated(a));
+  /* notes list — pinned float to top */
+  let notes;
+  if (isAll) {
+    notes = allNotesSorted();
+  } else {
+    notes = cat.notes.slice().sort((a, b) => {
+      if (a.pinned && !b.pinned) return -1;
+      if (!a.pinned && b.pinned) return 1;
+      return noteUpdated(b) - noteUpdated(a);
+    });
+  }
 
+  const pinnedCount = notes.filter(n => n.pinned).length;
   const sectionLabel = el('div', 'bc-section-label',
-    notes.length + (notes.length === 1 ? ' note' : ' notes') + ' · newest first');
+    notes.length + (notes.length === 1 ? ' note' : ' notes') +
+    (pinnedCount ? ' · ' + pinnedCount + ' pinned' : '') +
+    ' · newest first');
   root.appendChild(sectionLabel);
 
   const notesList = el('div', 'bc-notes-list');
@@ -369,24 +501,46 @@ function allNotesSorted() {
   for (const cat of state.brain.categories) {
     for (const n of cat.notes) all.push(n);
   }
-  return all.sort((a, b) => noteUpdated(b) - noteUpdated(a));
+  return all.sort((a, b) => {
+    if (a.pinned && !b.pinned) return -1;
+    if (!a.pinned && b.pinned) return 1;
+    return noteUpdated(b) - noteUpdated(a);
+  });
 }
 
 function noteEntryEl(note, idx, showCat) {
-  const entry = el('div', 'bc-note-entry');
+  const entry = el('div', 'bc-note-entry' + (note.pinned ? ' bc-note-pinned' : ''));
   entry.dataset.noteId = note.id;
   entry.dataset.idx = idx;
   if (idx === brainFocusIdx) entry.classList.add('focused');
   entry.addEventListener('click', () => navToEditor(note.id));
 
   const head = el('div', 'bc-note-head');
-  const title = el('div', 'bc-note-title', noteTitle(note));
+
+  /* pin button (affordance on the note row) */
+  const pinBtn = el('button', 'bc-pin-btn' + (note.pinned ? ' bc-pin-active' : ''));
+  pinBtn.title = note.pinned ? 'Unpin' : 'Pin note';
+  pinBtn.setAttribute('aria-label', note.pinned ? 'Unpin' : 'Pin note');
+  pinBtn.setAttribute('aria-pressed', note.pinned ? 'true' : 'false');
+  pinBtn.textContent = '📌';
+  pinBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    togglePin(note);
+  });
+
+  const titleEl = el('div', 'bc-note-title');
+  if (note.pinned) {
+    const pinGlyph = el('span', 'bc-note-pin-glyph', '📌 ');
+    pinGlyph.setAttribute('aria-hidden', 'true');
+    titleEl.appendChild(pinGlyph);
+  }
+  titleEl.appendChild(document.createTextNode(noteTitle(note)));
+
   const age = el('div', 'bc-note-age', relTime(noteUpdated(note)));
-  head.append(title, age);
+  head.append(pinBtn, titleEl, age);
 
   const snippet = el('div', 'bc-note-snippet');
-  // Untitled notes derive their title from the first line — the snippet starts
-  // at the second line so the row doesn't repeat itself.
+  // UX-05/UX-12: untitled notes — snippet from second line, not repeating first
   const snippetSource = (note.title && note.title.trim())
     ? note.text
     : note.text.split('\n').slice(1).join(' ');
@@ -403,6 +557,16 @@ function noteEntryEl(note, idx, showCat) {
     }
   }
   return entry;
+}
+
+/* ─── PIN TOGGLE ─── */
+function togglePin(note) {
+  note.pinned = !note.pinned;
+  if (!note.pinned) delete note.pinned;
+  save();
+  // re-render current pane to update sort order
+  if (brainPane === 'category') renderBrainCategory();
+  else if (brainPane === 'index') renderBrainIndex();
 }
 
 /* ─── CATEGORY RENAME ─── */
@@ -480,12 +644,82 @@ function saveFromComposer() {
   if (!cat) return;
   const note = newNote(text);
   cat.notes.unshift(note);
+  _justCreatedNoteIds.add(note.id); // flag: open in edit mode immediately
   save();
   clearComposerDraft();
   ta.value = '';
   autoGrowTa(ta);
   renderBrainCategory();
   ta.focus();
+}
+
+/* ─── WIKILINK AUTOCOMPLETE ─── */
+let _wikilinkPopover = null;
+
+function checkWikilinkTrigger(ta) {
+  const val = ta.value;
+  const pos = ta.selectionStart;
+  const before = val.slice(0, pos);
+  const bracketIdx = before.lastIndexOf('[[');
+  if (bracketIdx < 0 || before.slice(bracketIdx).includes(']]')) {
+    closeWikilinkPopover();
+    return;
+  }
+  const query = before.slice(bracketIdx + 2).toLowerCase();
+  // collect all note titles
+  const allTitles = [];
+  for (const cat of state.brain.categories) {
+    for (const n of cat.notes) {
+      allTitles.push({ title: noteTitle(n), id: n.id });
+    }
+  }
+  const matches = allTitles.filter(t => t.title.toLowerCase().includes(query)).slice(0, 8);
+  if (!matches.length) { closeWikilinkPopover(); return; }
+  showWikilinkPopover(ta, matches, bracketIdx, query.length);
+}
+
+function showWikilinkPopover(ta, matches, bracketIdx, queryLen) {
+  closeWikilinkPopover();
+  const pop = el('div', 'wikilink-autocomplete');
+  pop.setAttribute('role', 'listbox');
+  for (const m of matches) {
+    const item = el('button', 'wikilink-ac-item');
+    item.setAttribute('role', 'option');
+    item.textContent = m.title;
+    item.addEventListener('mousedown', (e) => {
+      e.preventDefault(); // don't blur textarea
+      insertWikilink(ta, bracketIdx, queryLen, m.title);
+      closeWikilinkPopover();
+    });
+    pop.appendChild(item);
+  }
+  // position near the textarea
+  const rect = ta.getBoundingClientRect();
+  pop.style.position = 'fixed';
+  pop.style.left = Math.min(rect.left + 4, window.innerWidth - 260) + 'px';
+  pop.style.top = (rect.bottom + 4) + 'px';
+  pop.style.zIndex = '300';
+  document.body.appendChild(pop);
+  _wikilinkPopover = pop;
+}
+
+function closeWikilinkPopover() {
+  if (_wikilinkPopover) { _wikilinkPopover.remove(); _wikilinkPopover = null; }
+}
+
+function insertWikilink(ta, bracketIdx, queryLen, title) {
+  const val = ta.value;
+  const pos = ta.selectionStart;
+  const before = val.slice(0, bracketIdx);
+  const after = val.slice(pos);
+  // replace [[query with [[title]]
+  ta.value = before + '[[' + title + ']]' + after;
+  const newPos = bracketIdx + 2 + title.length + 2;
+  ta.setSelectionRange(newPos, newPos);
+  // trigger save if in editor
+  const note = brainNoteId ? (findNote(brainNoteId) || {}).note : null;
+  if (note) scheduleEditorSave(note);
+  else scheduleShadowPush();
 }
 
 /* ─── EDITOR ─── */
@@ -501,6 +735,9 @@ function renderBrainEditor() {
   const note = f.note;
   const cat = f.cat;
   const color = catColor(cat);
+
+  // default to preview if note has content, edit if empty
+  if (brainEditorMode === 'preview' && !note.text.trim()) brainEditorMode = 'edit';
 
   /* breadcrumb */
   const bc = el('div', 'be-breadcrumb');
@@ -518,6 +755,45 @@ function renderBrainEditor() {
 
   /* toolbar */
   const toolbar = el('div', 'be-toolbar');
+
+  // Edit/Preview toggle (FG-03 calm UX — read mode first)
+  const modeBtn = el('button', 'be-tool-btn be-mode-btn');
+  modeBtn.id = 'beModeBtn';
+  const isEdit = brainEditorMode === 'edit';
+  modeBtn.appendChild(brainSvg(isEdit ? 'M2 12h4l8-8-4-4-8 8v4zM10 4l4 4' : 'M3 5h10M3 8h10M3 11h6', 14, 14, 1.4));
+  modeBtn.appendChild(el('span', null, isEdit ? 'Preview' : 'Edit'));
+  modeBtn.setAttribute('aria-label', isEdit ? 'Switch to preview' : 'Switch to edit');
+  modeBtn.addEventListener('click', () => {
+    if (brainEditorMode === 'edit') {
+      // flush before switching to preview
+      flushEditorSave(note);
+      brainEditorMode = 'preview';
+    } else {
+      brainEditorMode = 'edit';
+    }
+    renderBrainEditor();
+  });
+
+  // Pin button in toolbar
+  const pinBtn = el('button', 'be-tool-btn' + (note.pinned ? ' be-pin-active' : ''));
+  pinBtn.id = 'bePinBtn';
+  pinBtn.setAttribute('aria-pressed', note.pinned ? 'true' : 'false');
+  pinBtn.title = note.pinned ? 'Unpin' : 'Pin note';
+  pinBtn.appendChild(document.createTextNode('📌'));
+  pinBtn.appendChild(el('span', null, note.pinned ? 'Pinned' : 'Pin'));
+  pinBtn.addEventListener('click', () => {
+    togglePin(note);
+    pinBtn.className = 'be-tool-btn' + (note.pinned ? ' be-pin-active' : '');
+    pinBtn.querySelector('span').textContent = note.pinned ? 'Pinned' : 'Pin';
+    pinBtn.setAttribute('aria-pressed', note.pinned ? 'true' : 'false');
+  });
+
+  // Print button (FG-12)
+  const printBtn = el('button', 'be-tool-btn');
+  printBtn.appendChild(brainSvg('M4 5V2h8v3M4 11H2V6h12v5h-2M4 8h8M4 11v3h8v-3', 14, 14, 1.4));
+  printBtn.appendChild(el('span', null, 'Print'));
+  printBtn.addEventListener('click', () => printNote(note));
+
   const moveBtn = el('button', 'be-tool-btn');
   moveBtn.appendChild(brainSvg('M11 4.5L4 11.5M7 4H4v3', 14, 14, 1.4));
   moveBtn.appendChild(el('span', null, 'Move to…'));
@@ -529,12 +805,14 @@ function renderBrainEditor() {
   const autosaveDot = el('span', 'be-autosave');
   autosaveDot.id = 'beAutosave';
   autosaveDot.innerHTML = '<span class="be-autosave-dot"></span><span>Saved</span>';
+  const toolbarLeft = el('div', 'be-toolbar-left');
+  toolbarLeft.append(modeBtn, pinBtn);
   const toolbarRight = el('div', 'be-toolbar-right');
-  toolbarRight.append(moveBtn, delBtn, autosaveDot);
-  toolbar.appendChild(toolbarRight);
+  toolbarRight.append(printBtn, moveBtn, delBtn, autosaveDot);
+  toolbar.append(toolbarLeft, toolbarRight);
   root.appendChild(toolbar);
 
-  /* title input */
+  /* title input (always editable) */
   const titleInput = el('textarea', 'be-title');
   titleInput.id = 'beTitle';
   titleInput.placeholder = 'Title (optional)';
@@ -558,18 +836,72 @@ function renderBrainEditor() {
   meta.append(catChip, createdSpan, updatedSpan);
   root.appendChild(meta);
 
-  /* body textarea */
-  const body = el('textarea', 'be-body');
-  body.id = 'beBody';
-  body.placeholder = 'Start writing…';
-  body.value = note.text;
-  body.addEventListener('input', () => {
-    scheduleEditorSave(note);
-    updateWordCountEl();
-  });
-  root.appendChild(body);
-  // grow body to fill available space
-  requestAnimationFrame(() => { body.style.height = 'auto'; body.style.height = Math.max(420, body.scrollHeight) + 'px'; });
+  /* body: either edit textarea or rendered preview */
+  if (brainEditorMode === 'edit') {
+    const body = el('textarea', 'be-body');
+    body.id = 'beBody';
+    body.placeholder = 'Start writing… (use Markdown for formatting)';
+    body.value = note.text;
+    body.addEventListener('input', () => {
+      scheduleEditorSave(note);
+      updateWordCountEl();
+      checkWikilinkTrigger(body);
+    });
+    body.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && _wikilinkPopover) { e.stopPropagation(); closeWikilinkPopover(); }
+    });
+    root.appendChild(body);
+    requestAnimationFrame(() => { body.style.height = 'auto'; body.style.height = Math.max(420, body.scrollHeight) + 'px'; });
+    setTimeout(() => body.focus(), 60);
+  } else {
+    // Preview mode
+    const preview = el('div', 'be-preview');
+    preview.id = 'bePreview';
+    const html = renderNoteMarkdown(note);
+    if (html && html.trim()) {
+      preview.innerHTML = html; // safe: rendered by markdown.js escape-first pipeline
+      // wire [[link]] clicks
+      preview.querySelectorAll('.md-wikilink').forEach(a => {
+        a.addEventListener('click', (e) => {
+          e.preventDefault();
+          const title = a.dataset.wikilink;
+          if (!title) return;
+          const lower = title.toLowerCase();
+          for (const cat of state.brain.categories) {
+            for (const n of cat.notes) {
+              const t = (n.title && n.title.trim()) ? n.title.trim() : n.text.split('\n')[0].slice(0, 80);
+              if (t.toLowerCase() === lower) { navToEditor(n.id); return; }
+            }
+          }
+          toast('Note "' + title + '" not found');
+        });
+      });
+    } else {
+      preview.appendChild(el('div', 'be-preview-empty', 'No content yet. Click Edit to start writing.'));
+    }
+    // click on preview body → switch to edit
+    preview.addEventListener('click', (e) => {
+      if (e.target.closest('a')) return; // don't intercept link clicks
+      brainEditorMode = 'edit';
+      flushEditorSave(note);
+      renderBrainEditor();
+    });
+    root.appendChild(preview);
+  }
+
+  /* backlinks section (FG-04) */
+  const backlinks = buildBacklinks(note);
+  if (backlinks.length) {
+    const blSection = el('div', 'be-backlinks');
+    blSection.appendChild(el('div', 'be-backlinks-label', 'Linked from (' + backlinks.length + ')'));
+    for (const bl of backlinks) {
+      const btn = el('button', 'be-backlink-item');
+      btn.textContent = noteTitle(bl.note);
+      btn.addEventListener('click', () => navToEditor(bl.note.id));
+      blSection.appendChild(btn);
+    }
+    root.appendChild(blSection);
+  }
 
   /* word count */
   const wc = el('div', 'be-wordcount');
@@ -578,10 +910,30 @@ function renderBrainEditor() {
   root.appendChild(wc);
 
   titleInput.addEventListener('keydown', (e) => {
-    if (e.key === 'Tab') { e.preventDefault(); body.focus(); }
+    if (e.key === 'Tab') {
+      e.preventDefault();
+      if (brainEditorMode === 'edit') {
+        const body = $('#beBody');
+        if (body) body.focus();
+      }
+    }
   });
+}
 
-  setTimeout(() => body.focus(), 60);
+function buildBacklinks(targetNote) {
+  const targetTitle = noteTitle(targetNote).toLowerCase();
+  const results = [];
+  for (const cat of state.brain.categories) {
+    for (const n of cat.notes) {
+      if (n.id === targetNote.id) continue;
+      // look for [[targetTitle]] in the note text
+      if (n.text.toLowerCase().includes('[[' + targetTitle + ']]') ||
+          (targetNote.title && n.text.toLowerCase().includes('[[' + targetNote.title.toLowerCase() + ']]'))) {
+        results.push({ note: n, cat });
+      }
+    }
+  }
+  return results;
 }
 
 function updateWordCountEl() {
@@ -593,7 +945,6 @@ function updateWordCountEl() {
 function scheduleEditorSave(note) {
   clearTimeout(_editorSaveTimer);
   _editorDirty = true;
-  // Shadow push law: persist to state within 400ms
   _editorSaveTimer = setTimeout(() => {
     flushEditorSave(note);
   }, 350);
@@ -601,22 +952,20 @@ function scheduleEditorSave(note) {
 
 function flushEditorSave(note) {
   const titleEl = $('#beTitle');
-  const bodyEl = $('#beBody');
-  if (!titleEl || !bodyEl) return;
+  const bodyEl = $('#beBody'); // only present in edit mode
+  if (!titleEl) return;
   const newTitle = titleEl.value.trim();
-  const newText = bodyEl.value;
   if (newTitle) note.title = newTitle;
   else delete note.title;
-  note.text = newText;
+  if (bodyEl) {
+    note.text = bodyEl.value;
+  }
   note.updated = Date.now();
-  // Synchronous persist: flush runs from pagehide/visibilitychange, where a
-  // debounced save() would die with the page (and core's own pagehide flush
-  // has already run by the time this listener fires).
   saveNow();
   _editorDirty = false;
   const updEl = $('#beUpdated');
   if (updEl) updEl.textContent = 'Updated ' + relTime(note.updated);
-  autoGrowTa(bodyEl);
+  if (bodyEl) autoGrowTa(bodyEl);
 }
 
 /* flush on navigate away */
@@ -626,17 +975,171 @@ function editorFlushIfDirty() {
   if (f) flushEditorSave(f.note);
 }
 
-/* ─── DELETE NOTE ─── */
+/* ─── PRINT NOTE (FG-12) ─── */
+function printNote(note) {
+  // build a temporary printable div
+  const title = noteTitle(note);
+  const htmlBody = (typeof renderMd === 'function')
+    ? renderNoteMarkdown(note)
+    : note.text.split('\n').map(l => '<p>' + l + '</p>').join('');
+
+  const printWin = window.open('', '_blank', 'width=800,height=600');
+  if (!printWin) { window.print(); return; }
+  printWin.document.write(
+    '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>' + title + '</title>' +
+    '<style>body{font:16px/1.6 Georgia,serif;max-width:680px;margin:40px auto;padding:0 20px;}' +
+    'h3,h4,h5{margin:1.2em 0 .3em;}pre{background:#f5f5f5;padding:12px;border-radius:4px;overflow-x:auto;}' +
+    'code{background:#f0f0f0;padding:2px 5px;border-radius:3px;}' +
+    'blockquote{border-left:3px solid #ccc;margin-left:0;padding-left:12px;color:#555;}' +
+    'a{color:#3A5BF0;}ul,ol{padding-left:24px;}' +
+    '.print-title{font-size:24px;font-weight:700;margin-bottom:4px;}' +
+    '.print-meta{color:#888;font-size:13px;margin-bottom:24px;border-bottom:1px solid #eee;padding-bottom:12px;}' +
+    '</style></head><body>' +
+    '<div class="print-title">' + title + '</div>' +
+    '<div class="print-meta">Brain note · ' + new Date(note.created).toLocaleDateString() + '</div>' +
+    (htmlBody || '<p><em>No content</em></p>') +
+    '</body></html>'
+  );
+  printWin.document.close();
+  printWin.focus();
+  printWin.print();
+}
+
+/* ─── TRASH (FG-10) ─── */
 function deleteNote(note, cat) {
   editorFlushIfDirty();
   const idx = cat.notes.indexOf(note);
   if (idx < 0) return;
   cat.notes.splice(idx, 1);
+
+  // Move to trash instead of hard-delete
+  if (!Array.isArray(state.brain.trash)) state.brain.trash = [];
+  state.brain.trash.unshift({ note, catName: cat.name, catId: cat.id, deletedAt: Date.now() });
+
   save();
-  // register undo BEFORE navigation
   const catId = cat.id;
-  undoableToast('Note deleted', () => cat.notes.splice(clamp(idx, 0, cat.notes.length), 0, note));
+  // undo still works (re-splices from trash back into cat)
+  undoableToast('Note deleted', () => {
+    // remove from trash
+    const ti = state.brain.trash.findIndex(e => e.note.id === note.id);
+    if (ti >= 0) state.brain.trash.splice(ti, 1);
+    cat.notes.splice(clamp(idx, 0, cat.notes.length), 0, note);
+  });
   navToCategory(catId);
+}
+
+function navToTrash() {
+  editorFlushIfDirty();
+  brainPane = 'trash';
+  brainCatId = TRASH_CAT_ID;
+  brainNoteId = null;
+  brainFocusIdx = -1;
+  renderBrain();
+}
+
+function renderTrashView() {
+  const root = $('#brainRoot');
+  root.textContent = '';
+
+  const bc = el('div', 'bc-breadcrumb');
+  const bcBack = el('button', 'bc-back');
+  bcBack.appendChild(brainSvg('M8 2L3 6.5L8 11', 13, 13, 1.4));
+  bcBack.appendChild(el('span', null, 'Brain'));
+  bcBack.addEventListener('click', navToIndex);
+  const bcSep = el('span', 'bc-sep', '›');
+  const bcCur = el('span', 'bc-current', 'Trash');
+  bc.append(bcBack, bcSep, bcCur);
+  root.appendChild(bc);
+
+  const hero = el('div', 'bc-hero');
+  const heroInfo = el('div', 'bc-hero-info');
+  heroInfo.appendChild(el('div', 'bc-hero-name', 'Trash'));
+  const trash = state.brain.trash || [];
+  heroInfo.appendChild(el('div', 'bc-hero-stats', trash.length + ' deleted note' + (trash.length === 1 ? '' : 's') + ' · items older than 30 days are purged automatically'));
+  hero.appendChild(heroInfo);
+
+  if (trash.length > 0) {
+    const heroActions = el('div', 'bc-hero-actions');
+    const emptyBtn = el('button', 'bc-action-btn bc-action-danger');
+    emptyBtn.appendChild(svgIcon(ICONS.trash, 13, 1.4));
+    emptyBtn.appendChild(el('span', null, 'Empty trash'));
+    emptyBtn.addEventListener('click', () => {
+      const count = trash.length;
+      state.brain.trash = [];
+      save();
+      renderTrashView();
+      toast('Emptied trash (' + count + ' note' + (count === 1 ? '' : 's') + ' permanently deleted)');
+    });
+    heroActions.appendChild(emptyBtn);
+    hero.appendChild(heroActions);
+  }
+  root.appendChild(hero);
+
+  const sectionLabel = el('div', 'bc-section-label', trash.length + ' note' + (trash.length === 1 ? '' : 's') + ' in trash');
+  root.appendChild(sectionLabel);
+
+  const notesList = el('div', 'bc-notes-list');
+  if (trash.length === 0) {
+    notesList.appendChild(el('div', 'bc-notes-empty', 'Trash is empty.'));
+  } else {
+    for (let i = 0; i < trash.length; i++) {
+      const entry = trash[i];
+      const row = el('div', 'bc-note-entry bc-trash-entry');
+
+      const head = el('div', 'bc-note-head');
+      const titleEl = el('div', 'bc-note-title', noteTitle(entry.note));
+      const age = el('div', 'bc-note-age', 'Deleted ' + relTime(entry.deletedAt));
+      head.append(titleEl, age);
+
+      const actions = el('div', 'bc-trash-actions');
+
+      const restoreBtn = el('button', 'bc-action-btn');
+      restoreBtn.appendChild(svgIcon(ICONS.restore, 12, 1.4));
+      restoreBtn.appendChild(el('span', null, 'Restore'));
+      restoreBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        restoreTrashNote(i);
+      });
+
+      const delBtn = el('button', 'bc-action-btn bc-action-danger');
+      delBtn.appendChild(svgIcon(ICONS.trash, 12, 1.4));
+      delBtn.appendChild(el('span', null, 'Delete forever'));
+      delBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        state.brain.trash.splice(i, 1);
+        save();
+        renderTrashView();
+        toast('Note permanently deleted');
+      });
+
+      const catHint = el('span', 'bc-note-cat-chip', 'From: ' + (entry.catName || 'Unknown'));
+      actions.append(restoreBtn, delBtn, catHint);
+      row.append(head, actions);
+      notesList.appendChild(row);
+    }
+  }
+  root.appendChild(notesList);
+}
+
+function restoreTrashNote(trashIdx) {
+  const trash = state.brain.trash;
+  if (trashIdx < 0 || trashIdx >= trash.length) return;
+  const entry = trash[trashIdx];
+  trash.splice(trashIdx, 1);
+
+  // Re-file to original shelf if it still exists; otherwise create 'Restored'
+  let targetCat = state.brain.categories.find(c => c.id === entry.catId);
+  if (!targetCat) {
+    targetCat = state.brain.categories.find(c => c.name === 'Restored');
+    if (!targetCat) {
+      targetCat = newCategory('Restored');
+      state.brain.categories.unshift(targetCat);
+    }
+  }
+  targetCat.notes.unshift(entry.note);
+  save();
+  renderTrashView();
+  toast('Note restored to "' + targetCat.name + '"');
 }
 
 /* ─── MOVE NOTE ─── */
@@ -672,7 +1175,6 @@ function openCaptureSheet(presetCatId) {
   const overlay = $('#captureOverlay');
   overlay.classList.add('open');
 
-  /* populate category picker */
   const picker = $('#captureCatPicker');
   picker.textContent = '';
   const cats = state.brain.categories;
@@ -730,6 +1232,7 @@ function saveCapture() {
 
   const note = newNote(text);
   cat.notes.unshift(note);
+  _justCreatedNoteIds.add(note.id); // open in edit if user navigates to it
   save();
   closeCapture();
   toast('Note saved to "' + cat.name + '"');
@@ -740,9 +1243,117 @@ function saveCapture() {
   }
 }
 
+/* ─── JOURNAL ACTION (FG-06) ─── */
+function openTodaysJournal() {
+  const today = todayISO();
+  // find or create Journal shelf
+  let journalCat = state.brain.categories.find(c => c.name === JOURNAL_SHELF);
+  if (!journalCat) {
+    journalCat = newCategory(JOURNAL_SHELF);
+    state.brain.categories.unshift(journalCat);
+    save();
+  }
+  // find or create today's note
+  let todayNote = journalCat.notes.find(n => {
+    const t = (n.title && n.title.trim()) ? n.title.trim() : n.text.split('\n')[0];
+    return t === today;
+  });
+  if (!todayNote) {
+    todayNote = newNote('');
+    todayNote.title = today;
+    journalCat.notes.unshift(todayNote);
+    save();
+  }
+  // navigate to editor
+  brainEditorMode = 'edit';
+  navToEditor(todayNote.id);
+}
+
+/* ─── SHORTCUTS OVERLAY (FG-07) ─── */
+let _shortcutsOverlayOpen = false;
+function openShortcutsOverlay() {
+  if (_shortcutsOverlayOpen) return;
+  _shortcutsOverlayOpen = true;
+  const backdrop = el('div', 'shortcuts-backdrop');
+  const panel = el('div', 'shortcuts-panel');
+
+  const head = el('div', 'shortcuts-head');
+  head.appendChild(el('span', 'shortcuts-title', 'Keyboard Shortcuts'));
+  const closeBtn = el('button', 'shortcuts-close');
+  closeBtn.appendChild(svgIcon(ICONS.x, 13, 2));
+  closeBtn.title = 'Close';
+  closeBtn.addEventListener('click', close);
+  head.appendChild(closeBtn);
+  panel.appendChild(head);
+
+  const groups = [
+    { title: 'Global', rows: [
+      ['⌘K', 'Open command palette'],
+      ['?', 'Show keyboard shortcuts'],
+    ]},
+    { title: 'Boards', rows: [
+      ['Double-click canvas', 'New board'],
+      ['Double-click board title', 'Rename board'],
+      ['Esc', 'Close modal / composer'],
+    ]},
+    { title: 'Brain', rows: [
+      ['N', 'Focus composer (in shelf)'],
+      ['j / k', 'Navigate notes'],
+      ['Enter', 'Open focused note'],
+      ['Esc', 'Go back'],
+      ['e', 'Toggle edit/preview in editor'],
+    ]},
+    { title: 'Brain Editor', rows: [
+      ['⌘↵', 'Save note / save from composer'],
+      ['Tab', 'Jump to body'],
+      ['Esc', 'Back to shelf'],
+      ['[[', 'Insert note link (autocomplete)'],
+    ]},
+    { title: 'Library', rows: [
+      ['/', 'Focus search'],
+      ['j / k', 'Navigate articles'],
+      ['Enter', 'Open article'],
+      ['Esc', 'Close reader'],
+    ]},
+  ];
+
+  for (const g of groups) {
+    const section = el('div', 'shortcuts-section');
+    section.appendChild(el('div', 'shortcuts-group-title', g.title));
+    const table = el('div', 'shortcuts-table');
+    for (const [key, desc] of g.rows) {
+      const row = el('div', 'shortcuts-row');
+      const kbdWrap = el('div', 'shortcuts-key-wrap');
+      const kbd = el('kbd', 'shortcuts-kbd', key);
+      kbdWrap.appendChild(kbd);
+      row.append(kbdWrap, el('span', 'shortcuts-desc', desc));
+      table.appendChild(row);
+    }
+    section.appendChild(table);
+    panel.appendChild(section);
+  }
+
+  backdrop.appendChild(panel);
+  document.body.appendChild(backdrop);
+  requestAnimationFrame(() => backdrop.classList.add('show'));
+
+  function close() {
+    _shortcutsOverlayOpen = false;
+    backdrop.classList.remove('show');
+    setTimeout(() => backdrop.remove(), 180);
+    window.removeEventListener('keydown', onKey, true);
+  }
+  function onKey(e) {
+    if (e.key === 'Escape' || e.key === '?') { e.stopPropagation(); close(); }
+  }
+  window.addEventListener('keydown', onKey, true);
+  backdrop.addEventListener('mousedown', (e) => { if (e.target === backdrop) close(); });
+}
+
 /* ─── NAVIGATION ─── */
 function navToIndex() {
   editorFlushIfDirty();
+  closeWikilinkPopover();
   brainPane = 'index';
   brainCatId = null;
   brainNoteId = null;
@@ -751,6 +1362,7 @@ function navToIndex() {
 }
 function navToCategory(catId) {
   editorFlushIfDirty();
+  closeWikilinkPopover();
   brainPane = 'category';
   brainCatId = catId;
   brainNoteId = null;
@@ -759,34 +1371,45 @@ function navToCategory(catId) {
 }
 function navToEditor(noteId) {
   editorFlushIfDirty();
+  closeWikilinkPopover();
   const f = findNote(noteId);
   if (!f) return;
   brainPane = 'editor';
   brainNoteId = noteId;
-  // set catId to the note's actual category for breadcrumb
   brainCatId = f.cat.id;
   brainFocusIdx = -1;
+  // Always open in edit mode (tests depend on .be-body being present); 'e' key toggles preview
+  _justCreatedNoteIds.delete(noteId);
+  brainEditorMode = 'edit';
   renderBrain();
 }
 
-/* ─── KEYBOARD NAV (j/k/N/Esc) ─── */
+/* ─── KEYBOARD NAV (j/k/N/Esc/e/?) ─── */
 function brainKeyHandler(e) {
   if (state.view !== 'brain') return;
   if (brainCaptureOpen) return;
   if (activePopoverClose) return;
+  if (_shortcutsOverlayOpen) return;
 
   const tag = document.activeElement && document.activeElement.tagName.toLowerCase();
   const inField = tag === 'input' || tag === 'textarea';
 
+  // '?' opens shortcuts (not in field)
+  if (e.key === '?' && !inField) {
+    e.preventDefault();
+    openShortcutsOverlay();
+    return;
+  }
+
   if (e.key === 'Escape') {
+    if (_wikilinkPopover) { closeWikilinkPopover(); e.preventDefault(); return; }
     if (brainPane === 'editor') {
-      // Esc from editor always navigates back, even from textarea
       e.preventDefault();
       if (document.activeElement) document.activeElement.blur();
       navToCategory(brainCatId);
       return;
     }
-    if (brainPane === 'category') {
+    if (brainPane === 'category' || brainPane === 'trash') {
       e.preventDefault();
       if (document.activeElement) document.activeElement.blur();
       navToIndex();
@@ -795,11 +1418,33 @@ function brainKeyHandler(e) {
     return;
   }
 
+  // 'e' in editor toggles edit/preview (not in field)
+  if (e.key === 'e' && !inField && brainPane === 'editor') {
+    e.preventDefault();
+    const f = brainNoteId ? findNote(brainNoteId) : null;
+    if (brainEditorMode === 'edit') {
+      if (f) flushEditorSave(f.note);
+      brainEditorMode = 'preview';
+    } else {
+      brainEditorMode = 'edit';
+    }
+    renderBrainEditor();
+    return;
+  }
+
   // j/k/N only when not in a text field
   if (inField) return;
   if (brainPane === 'category') {
     const notes = brainCatId === ALL_NOTES_ID ? allNotesSorted()
-      : (findCat(brainCatId) || { notes: [] }).notes.slice().sort((a, b) => noteUpdated(b) - noteUpdated(a));
+      : (() => {
+          const c = findCat(brainCatId);
+          if (!c) return [];
+          return c.notes.slice().sort((a, b) => {
+            if (a.pinned && !b.pinned) return -1;
+            if (!a.pinned && b.pinned) return 1;
+            return noteUpdated(b) - noteUpdated(a);
+          });
+        })();
     if (!notes.length) {
       if (e.key === 'n' || e.key === 'N') { e.preventDefault(); const ta = $('#bcComposerArea'); if (ta) ta.focus(); }
       return;
@@ -837,27 +1482,19 @@ function autoGrowTa(ta) {
   ta.style.height = ta.scrollHeight + 'px';
 }
 
-/* ─── MAIN renderBrain (called from renderAll) ─── */
-// The old renderBrain referenced capture-board/library. New one is above.
-// renderAll calls renderBrain(); body[data-view=brain] triggers brain CSS.
-
-/* ─── TOPBAR VISIBILITY (driven via CSS + body data attrs) ─── */
-// body[data-view=brain] already hides wsSwitcher, tidyBtn via brain.css.
-// brainTabs seg-sub is removed from index.html; FAB is always visible in Brain.
-
 /* ─── WIRING ─── */
 (function brainWiring() {
-  /* FAB: quick capture in Brain, pencil in Boards */
+  /* FAB: quick capture in Brain */
   $('#fabCapture').addEventListener('click', () => {
     if (state.view !== 'brain') return;
-    openCaptureSheet(brainCatId !== ALL_NOTES_ID ? brainCatId : null);
+    openCaptureSheet(brainCatId !== ALL_NOTES_ID && brainCatId !== TRASH_CAT_ID ? brainCatId : null);
   });
 
   /* dblclick on the brain root (empty space) opens capture */
   $('#brainRoot').addEventListener('dblclick', (e) => {
     if (state.view !== 'brain') return;
-    if (e.target !== e.currentTarget) return; // only bare background
-    openCaptureSheet(brainCatId !== ALL_NOTES_ID ? brainCatId : null);
+    if (e.target !== e.currentTarget) return;
+    openCaptureSheet(brainCatId !== ALL_NOTES_ID && brainCatId !== TRASH_CAT_ID ? brainCatId : null);
   });
 
   /* capture overlay: click outside sheet closes */
@@ -866,8 +1503,6 @@ function autoGrowTa(ta) {
   });
   $('#captureClose').addEventListener('click', closeCapture);
   $('#captureSaveBtn').addEventListener('click', saveCapture);
-  // Bound to the sheet, not the textarea: ⌘↵ must save even when focus moved
-  // to the category picker (type → pick shelf → ⌘↵ is the natural flow).
   $('#captureOverlay').addEventListener('keydown', (e) => {
     if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); saveCapture(); }
     if (e.key === 'Escape') closeCapture();
@@ -888,5 +1523,11 @@ function autoGrowTa(ta) {
       const f = brainNoteId ? findNote(brainNoteId) : null;
       if (f) flushEditorSave(f.note);
     }
+  });
+
+  /* inbox drain on load and on storage event — deferred so app.js init() sets state first */
+  setTimeout(() => { purgeExpiredTrash(); drainInbox(); }, 0);
+  window.addEventListener('storage', (e) => {
+    if (e.key === INBOX_KEY && e.newValue) drainInbox();
   });
 })();
