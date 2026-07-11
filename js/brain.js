@@ -866,7 +866,9 @@ function autoGrowTa(ta) {
   });
   $('#captureClose').addEventListener('click', closeCapture);
   $('#captureSaveBtn').addEventListener('click', saveCapture);
-  $('#captureArea').addEventListener('keydown', (e) => {
+  // Bound to the sheet, not the textarea: ⌘↵ must save even when focus moved
+  // to the category picker (type → pick shelf → ⌘↵ is the natural flow).
+  $('#captureOverlay').addEventListener('keydown', (e) => {
     if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); saveCapture(); }
     if (e.key === 'Escape') closeCapture();
   });
