@@ -1544,8 +1544,14 @@ function autoGrowTa(ta) {
     }
   });
 
-  /* inbox drain on load and on storage event — deferred so app.js init() sets state first */
-  setTimeout(() => { purgeExpiredTrash(); drainInbox(); }, 0);
+  /* Trash purge + inbox drain on load. brain.js loads before app.js, so `state`
+     is null when this IIFE runs; a one-shot setTimeout(0) raced app.js init()
+     and, when it lost, left expired trash unpurged and pending clips undrained
+     forever. Poll until loadState() has populated state, then run exactly once. */
+  (function bootBrainMaintenance() {
+    if (state && state.brain) { purgeExpiredTrash(); drainInbox(); return; }
+    setTimeout(bootBrainMaintenance, 30);
+  })();
   window.addEventListener('storage', (e) => {
     if (e.key === INBOX_KEY && e.newValue) drainInbox();
   });

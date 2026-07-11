@@ -1113,7 +1113,13 @@ with sync_playwright() as pw:
         "localStorage.setItem('slate.state.v1', " + _json.dumps(_json.dumps(seed_state)) + ")")
     p_tp = ctx_tp.new_page()
     p_tp.goto(BASE)
-    p_tp.wait_for_timeout(800)  # allow purgeExpiredTrash setTimeout(0) to fire + saveNow
+    # purgeExpiredTrash fires on setTimeout(0) then saveNow persists — poll for
+    # the outcome rather than a fixed sleep (the fixed 800ms was flaky under
+    # parallel-server load and would cause intermittent CI reds in wave 3).
+    try:
+        p_tp.wait_for_function("() => (state.brain.trash || []).length === 0", timeout=6000)
+    except Exception:
+        pass
     # The trash entry should be gone from state
     trash_count = p_tp.evaluate("() => (state.brain.trash || []).length")
     check("finding2: purgeExpiredTrash removes entry from in-memory state", trash_count == 0,
