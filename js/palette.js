@@ -71,34 +71,22 @@ function locateCard(wsObj, card) {
 function locateTopic(cat) {
   closeAnyModal();
   state.view = 'brain';
-  brainTab = 'library';
   save();
-  renderAll();
-  const pane = $('.pane[data-id="' + cat.id + '"]');
-  if (pane) pane.scrollIntoView({ behavior: 'smooth', block: 'start' });
-  pulseNode(pane);
+  navToCategory(cat.id);
 }
 function locateNote(noteId) {
   closeAnyModal();
   state.view = 'brain';
-  brainTab = 'library';
   save();
-  renderAll();
-  const f = findNote(noteId);
-  if (!f) return;
-  const pane = $('.pane[data-id="' + f.cat.id + '"]');
-  if (pane) pane.scrollIntoView({ behavior: 'smooth', block: 'start' });
-  pulseNode(pane);
-  openNoteModal(noteId);
+  navToEditor(noteId);
 }
 
 /* ---------- index ---------- */
 function paletteIndex() {
   const out = [];
-  const goView = (view, tab) => () => {
+  const goView = (view) => () => {
     closeAnyModal();
     state.view = view;
-    if (tab) brainTab = tab;
     save();
     renderAll();
   };
@@ -110,18 +98,20 @@ function paletteIndex() {
     const vp = $('#viewport');
     createBoardAt(vp.scrollLeft + vp.clientWidth / 2 - BOARD_W / 2, vp.scrollTop + Math.min(vp.clientHeight / 3, 180));
   } });
-  out.push({ type: 'action', label: 'Write a note', hint: 'Brain', run: () => {
+  out.push({ type: 'action', label: 'Quick capture', hint: 'Brain', run: () => {
     closeAnyModal();
     state.view = 'brain';
-    brainTab = 'board';
     save();
     renderAll();
-    const vp = $('#viewport');
-    openBnoteComposer(vp.scrollLeft + vp.clientWidth / 2 - BNOTE_W / 2, vp.scrollTop + Math.min(vp.clientHeight / 3, 200));
+    openCaptureSheet(null);
   } });
   out.push({ type: 'action', label: 'Go to Boards', hint: 'View', run: goView('tasks') });
-  out.push({ type: 'action', label: 'Go to Brain board', hint: 'View', run: goView('brain', 'board') });
-  out.push({ type: 'action', label: 'Go to Library', hint: 'View', run: goView('brain', 'library') });
+  out.push({ type: 'action', label: 'Go to Brain', hint: 'View', run: () => {
+    closeAnyModal();
+    state.view = 'brain';
+    save();
+    navToIndex();
+  } });
   out.push({ type: 'action', label: 'Toggle dark mode', hint: 'Theme', run: () => {
     state.theme = state.theme === 'dark' ? 'light' : 'dark';
     save();
@@ -160,8 +150,8 @@ function paletteIndex() {
     out.push({ type: 'topic', label: cat.name, hint: 'Brain · ' + cat.notes.length + (cat.notes.length === 1 ? ' note' : ' notes'),
       run: () => locateTopic(cat) });
     for (const n of cat.notes) {
-      const chars = Array.from(n.text); // code-point slice: never split an emoji surrogate pair
-      out.push({ type: 'note', label: chars.length > 90 ? chars.slice(0, 90).join('') + '…' : n.text, hay: n.text,
+      const title = (typeof noteTitle === 'function') ? noteTitle(n) : (n.title || n.text.split('\n')[0].slice(0, 80));
+      out.push({ type: 'note', label: title, hay: title + ' ' + n.text,
         hint: 'Brain · ' + cat.name, run: () => locateNote(n.id) });
     }
   }

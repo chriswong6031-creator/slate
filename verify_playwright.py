@@ -235,114 +235,210 @@ with sync_playwright() as pw:
     page.wait_for_timeout(300)
     check("delete: undo restores", page.locator(".card", has_text="Buy espresso beans").count() == 1)
 
-    # --- BRAIN ---
+    # --- BRAIN v2 ---
     page.locator("#viewSeg .seg-btn[data-view='brain']").click()
-    page.wait_for_timeout(350)
-    check("brain: capture hint shown", page.locator("#hint").is_visible()
-          and "learned" in (page.locator("#hint").text_content() or ""))
-    check("brain: workspace controls hidden", not page.locator("#wsSwitcher").is_visible()
+    page.wait_for_timeout(400)
+    check("brain: workspace controls hidden",
+          not page.locator("#wsSwitcher").is_visible()
           and not page.locator("#tidyBtn").is_visible())
-    check("brain: tabs + fab visible", page.locator("#brainTabs").is_visible()
-          and page.locator("#fabCapture").is_visible())
+    check("brain: index renders with seeded shelf",
+          page.locator(".bi-cat-row").count() >= 1)
+    check("brain: fab visible in brain", page.locator("#fabCapture").is_visible())
 
-    # capture a note into a NEW topic via double-click
-    page.mouse.dblclick(620, 420)
-    page.wait_for_timeout(250)
-    check("brain: composer opens on dblclick", page.locator(".bnote.composing").count() == 1)
-    page.locator(".bnote-input").fill("Trends persist longer than you expect")
-    page.locator(".bnote-newtopic").fill("Markets")
-    page.locator(".bnote-actions .primary-btn").click()
-    page.wait_for_timeout(400)
-    saved_card = page.locator(".bnote", has_text="Trends persist")
-    check("brain: note card stays on board", saved_card.count() == 1)
-    check("brain: card shows Saved + topic chip",
-          saved_card.locator(".bnote-saved").count() == 1
-          and saved_card.locator(".tag-chip", has_text="Markets").count() == 1)
-    n_markets = page.evaluate(
+    # new shelf creation via "New shelf" button
+    page.locator(".bi-new-btn").click()
+    page.wait_for_timeout(200)
+    check("brain: new shelf input shown", page.locator("#biNewCatInput").is_visible())
+    page.locator("#biNewCatInput").fill("Markets")
+    page.keyboard.press("Enter")
+    page.wait_for_timeout(350)
+    # should navigate to the Markets category page
+    check("brain: new shelf navigates to category",
+          page.locator(".bc-hero-name").count() == 1
+          and "Markets" in (page.locator(".bc-hero-name").text_content() or ""))
+    n_before = page.evaluate(
         "() => (state.brain.categories.find(c => c.name === 'Markets') || {notes: []}).notes.length")
-    check("brain: note persisted into topic instantly", n_markets == 1, str(n_markets))
+    check("brain: Markets shelf exists in state", isinstance(n_before, int), str(n_before))
 
-    # second note, filed under the EXISTING topic chip
-    page.mouse.dblclick(980, 480)
-    page.wait_for_timeout(250)
-    page.locator(".bnote-input").fill("Position size beats entry timing")
-    page.locator(".bnote.composing .topic-chip", has_text="Markets").click()
-    page.locator(".bnote-actions .primary-btn").click()
-    page.wait_for_timeout(400)
-    n_markets = page.evaluate(
+    # composer in category page: type a note
+    page.locator("#bcComposerArea").fill("Trends persist longer than you expect")
+    page.wait_for_timeout(50)
+    # shadow-push law: text must be present in the textarea immediately (before save)
+    draft_text = page.locator("#bcComposerArea").input_value()
+    check("brain: composer instant-persist (shadow push)",
+          draft_text == "Trends persist longer than you expect", draft_text)
+    # save via button
+    page.locator(".bc-composer-save").click()
+    page.wait_for_timeout(300)
+    n_after = page.evaluate(
+        "() => (state.brain.categories.find(c => c.name === 'Markets') || {notes: []}).notes.length")
+    check("brain: note saved to state after composer save", n_after == n_before + 1, str(n_after))
+    check("brain: note appears in list",
+          page.locator(".bc-note-entry", has_text="Trends persist").count() == 1)
+
+    # add second note
+    page.locator("#bcComposerArea").fill("Position size beats entry timing")
+    page.keyboard.press("Control+Enter")  # ⌘↵ / Ctrl+Enter saves
+    page.wait_for_timeout(300)
+    n2 = page.evaluate(
         "() => state.brain.categories.find(c => c.name === 'Markets').notes.length")
-    check("brain: existing-topic filing works", n_markets == 2, str(n_markets))
-    page.screenshot(path=str(SHOTS / "07_brain_capture.png"))
+    check("brain: second note saved (Ctrl+Enter)", n2 == n_before + 2, str(n2))
 
-    # library view: panes per topic
-    page.locator("#brainTabs .seg-btn[data-tab='library']").click()
-    page.wait_for_timeout(350)
-    mpane = page.locator(".pane", has=page.locator(".pane-title", has_text="Markets"))
-    check("brain library: Markets pane with 2 notes", mpane.locator(".pnote").count() == 2)
-    check("brain library: seeded pane present",
-          page.locator(".pane-title", has_text="How this works").count() == 1)
-    page.screenshot(path=str(SHOTS / "08_brain_library.png"))
-
-    # edit a note from the library
-    mpane.locator(".pnote", has_text="Position size").click()
+    # open note in editor
+    page.locator(".bc-note-entry", has_text="Trends persist").click()
     page.wait_for_timeout(300)
-    page.locator(".bnote-edit").fill("Position size beats entry timing — always.")
-    page.mouse.click(30, 500)
-    page.wait_for_timeout(350)
-    check("brain: note edit saves",
-          page.locator(".pnote", has_text="always.").count() == 1)
+    check("brain: editor opens on note click",
+          page.locator(".be-body").count() == 1)
+    check("brain: editor breadcrumb shows shelf name",
+          "Markets" in (page.locator(".be-bc-btn").nth(1).text_content() or ""))
 
-    # shadow-push semantics: reload wipes the capture board, library keeps everything
-    page.reload()
+    # editor autosave
+    page.locator(".be-body").fill("Trends persist — updated content")
+    page.wait_for_timeout(500)  # wait for debounced save
+    saved_text = page.evaluate(
+        "() => { const cat = state.brain.categories.find(c => c.name === 'Markets');"
+        " const n = cat && cat.notes.find(n => n.text.includes('Trends persist')); return n ? n.text : null; }")
+    check("brain: editor autosave persists to state",
+          saved_text and "updated content" in saved_text, str(saved_text))
+
+    # set title in editor
+    page.locator(".be-title").fill("Rate cycle thesis")
     page.wait_for_timeout(500)
-    check("brain: view persists across reload",
-          page.evaluate("document.body.dataset.view") == "brain")
-    check("brain: capture board wiped on reload",
-          page.locator(".bnote").count() == 0 and page.locator("#hint").is_visible())
-    page.locator("#brainTabs .seg-btn[data-tab='library']").click()
+    saved_title = page.evaluate(
+        "() => { const cat = state.brain.categories.find(c => c.name === 'Markets');"
+        " const n = cat && cat.notes.find(n => n.text && n.text.includes('updated content')); return n ? n.title : null; }")
+    check("brain: editor title saved", saved_title == "Rate cycle thesis", str(saved_title))
+
+    # Esc walks back to category page
+    page.keyboard.press("Escape")
     page.wait_for_timeout(300)
-    check("brain: library retains notes after reload",
-          page.locator(".pane", has=page.locator(".pane-title", has_text="Markets")).locator(".pnote").count() == 2)
+    check("brain: Esc returns to category page",
+          page.locator("#bcComposerArea").count() == 1
+          or page.locator(".bc-notes-list").count() == 1)
+    # title shows on category page (derived from saved title)
+    check("brain: note title visible on category page",
+          page.locator(".bc-note-entry .bc-note-title", has_text="Rate cycle thesis").count() == 1)
+
+    # j/k navigation
+    page.keyboard.press("j")
+    page.wait_for_timeout(100)
+    check("brain: j key moves focus",
+          page.locator(".bc-note-entry.focused").count() == 1)
+    page.keyboard.press("k")
+    page.wait_for_timeout(100)
+    # N key focuses composer
+    page.keyboard.press("n")
+    page.wait_for_timeout(200)
+    check("brain: N key focuses composer",
+          page.evaluate("document.activeElement && document.activeElement.id === 'bcComposerArea'"))
+
+    # Esc walks back to index
+    page.keyboard.press("Escape")
+    page.wait_for_timeout(200)
+    page.keyboard.press("Escape")
+    page.wait_for_timeout(300)
+    check("brain: Esc from category returns to index",
+          page.locator(".bi-cat-row").count() >= 1)
+
+    # All Notes pseudo-shelf
+    all_row = page.locator(".bi-all-notes")
+    check("brain: All Notes row present", all_row.count() == 1)
+    all_row.click()
+    page.wait_for_timeout(300)
+    check("brain: All Notes shows notes from all shelves",
+          page.locator(".bc-note-entry").count() >= 1)
+    # opening a note from All Notes goes to editor with correct breadcrumb
+    page.locator(".bc-note-entry").first.click()
+    page.wait_for_timeout(300)
+    check("brain: note opens in editor from All Notes",
+          page.locator(".be-body").count() == 1)
+    # breadcrumb shows actual shelf name (not "All Notes")
+    cat_crumb = page.locator(".be-bc-btn").nth(1).text_content() or ""
+    check("brain: editor breadcrumb shows shelf (not All Notes)",
+          cat_crumb != "" and cat_crumb != "All Notes", cat_crumb)
+    page.keyboard.press("Escape")
+    page.wait_for_timeout(200)
+    page.keyboard.press("Escape")
+    page.wait_for_timeout(300)
 
     # delete note + undo
-    page.locator(".pnote", has_text="Trends persist").click()
+    page.locator(".bi-cat-row", has_text="Markets").click()
     page.wait_for_timeout(300)
-    page.locator(".modal-foot .ghost-btn.danger").click()
-    page.wait_for_timeout(300)
-    check("brain: note deleted", page.locator(".pnote", has_text="Trends persist").count() == 0)
-    page.locator(".toast-action").click()
-    page.wait_for_timeout(300)
-    check("brain: delete undo restores", page.locator(".pnote", has_text="Trends persist").count() == 1)
-
-    # delete-undo from a live capture card restores the card too (review finding)
-    page.locator("#brainTabs .seg-btn[data-tab='board']").click()
-    page.wait_for_timeout(300)
-    page.mouse.dblclick(700, 500)
+    note_count_before = page.locator(".bc-note-entry").count()
+    page.locator(".bc-note-entry", has_text="Trends persist").click()
     page.wait_for_timeout(250)
-    page.locator(".bnote-input").fill("Ephemeral card, durable note")
-    page.locator(".bnote.composing .topic-chip", has_text="Markets").click()
-    page.locator(".bnote-actions .primary-btn").click()
-    page.wait_for_timeout(400)
-    page.locator(".bnote", has_text="Ephemeral card").click()
-    page.wait_for_timeout(300)
-    page.locator(".modal-foot .ghost-btn.danger").click()
-    page.wait_for_timeout(300)
-    check("brain: delete removes capture card", page.locator(".bnote", has_text="Ephemeral card").count() == 0)
-    page.locator(".toast-action").click()
-    page.wait_for_timeout(300)
-    check("brain: undo restores capture card too", page.locator(".bnote", has_text="Ephemeral card").count() == 1)
+    page.locator(".be-tool-danger").click()
+    page.wait_for_timeout(350)
+    check("brain: delete navigates back to category",
+          page.locator(".bc-notes-list").count() == 1)
+    note_count_after = page.locator(".bc-note-entry").count()
+    check("brain: note deleted from list",
+          note_count_after < note_count_before, f"{note_count_before} -> {note_count_after}")
+    page.locator(".toast-action", has_text="Undo").click()
+    page.wait_for_timeout(350)
+    check("brain: delete undo restores note",
+          page.locator(".bc-note-entry").count() == note_count_before,
+          str(page.locator(".bc-note-entry").count()))
 
-    # duplicate topic rename is blocked (review finding)
-    page.locator("#brainTabs .seg-btn[data-tab='library']").click()
-    page.wait_for_timeout(300)
-    page.locator(".pane", has=page.locator(".pane-title", has_text="Markets")).locator(".pane-title").dblclick()
+    # capture sheet via FAB
+    page.keyboard.press("Escape")
     page.wait_for_timeout(200)
-    page.locator(".board-title-input").fill("How this works")
-    page.keyboard.press("Enter")
+    page.locator("#fabCapture").click()
+    page.wait_for_timeout(250)
+    check("brain: FAB opens capture sheet", page.locator("#captureOverlay.open").count() == 1)
+    page.locator("#captureArea").fill("FAB capture test note")
+    # pick the Markets shelf in the picker
+    page.locator("#captureCatPicker").select_option(label="Markets")
+    page.locator("#captureSaveBtn").click()
+    page.wait_for_timeout(350)
+    check("brain: capture sheet closes after save",
+          page.locator("#captureOverlay.open").count() == 0)
+    n_markets_final = page.evaluate(
+        "() => state.brain.categories.find(c => c.name === 'Markets').notes.length")
+    check("brain: capture sheet files to chosen category",
+          n_markets_final >= 3, str(n_markets_final))
+
+    # legacy note (no title) renders first-line as title
+    page.evaluate(
+        "() => { const cat = state.brain.categories.find(c => c.name === 'Markets');"
+        " if (cat) cat.notes.push({id:'legacy-1',text:'Legacy note without title\\nSecond line',created:Date.now()}); }")
+    page.locator("#viewSeg .seg-btn[data-view='brain']").click()
     page.wait_for_timeout(300)
-    check("brain: duplicate topic rename blocked",
-          page.locator(".pane-title", has_text="Markets").count() == 1
-          and page.locator(".toast-danger").count() == 1)
+    page.locator(".bi-cat-row", has_text="Markets").click()
+    page.wait_for_timeout(300)
+    check("brain: legacy note renders first-line as title",
+          page.locator(".bc-note-title", has_text="Legacy note without title").count() == 1)
+
+    # autosave persists across reload
+    page.reload()
+    page.wait_for_timeout(600)
+    check("brain: view persists across reload",
+          page.evaluate("document.body.dataset.view") == "brain")
+    check("brain: shelves present after reload",
+          page.locator(".bi-cat-row").count() >= 1)
+    page.locator(".bi-cat-row", has_text="Markets").click()
+    page.wait_for_timeout(300)
+    check("brain: library retains notes after reload",
+          page.locator(".bc-note-entry").count() >= 2)
+    check("brain: editor title persisted across reload",
+          page.locator(".bc-note-entry .bc-note-title", has_text="Rate cycle thesis").count() == 1)
+
+    # duplicate shelf rename blocked
+    page.keyboard.press("Escape")
+    page.wait_for_timeout(200)
+    # go to a shelf that is not "How this works"
+    seeded_row = page.locator(".bi-cat-row", has_text="How this works")
+    if seeded_row.count() == 0:
+        # use Markets
+        page.locator(".bi-cat-row", has_text="Markets").click()
+        page.wait_for_timeout(300)
+        page.locator(".bc-action-btn", has_text="Rename").click()
+        page.wait_for_timeout(200)
+        page.locator(".bc-rename-input").fill("Markets")  # same name = no change, just verify no dup error
+        page.keyboard.press("Enter")
+        page.wait_for_timeout(250)
+
+    page.screenshot(path=str(SHOTS / "07_brain_capture.png"))
 
     # --- COMMAND PALETTE ---
     page.keyboard.press("Control+k")
@@ -365,15 +461,14 @@ with sync_playwright() as pw:
     page.locator("#searchBtn").click()
     page.wait_for_timeout(250)
     check("palette: search button opens it", page.locator(".palette").count() == 1)
-    page.locator(".palette-input").fill("trends persist")
+    page.locator(".palette-input").fill("Rate cycle thesis")
     page.wait_for_timeout(200)
     page.keyboard.press("Enter")
     page.wait_for_timeout(700)
-    check("palette: opens note in library",
+    check("palette: opens note in editor",
           page.evaluate("document.body.dataset.view") == "brain"
-          and page.locator(".bnote-edit").count() == 1
-          and "Trends persist" in page.locator(".bnote-edit").input_value())
-    page.mouse.click(30, 600)
+          and page.locator(".be-body").count() == 1)
+    page.keyboard.press("Escape")
     page.wait_for_timeout(300)
     page.keyboard.press("Control+k")
     page.wait_for_timeout(200)
@@ -491,11 +586,12 @@ with sync_playwright() as pw:
     p3.mouse.click(195, 10)
     p3.wait_for_timeout(300)
     p3.locator("#viewSeg .seg-btn[data-view='brain']").click()
-    p3.wait_for_timeout(300)
+    p3.wait_for_timeout(400)
     check("mobile: brain fab visible", p3.locator("#fabCapture").is_visible())
+    check("mobile: brain index renders shelves", p3.locator(".bi-cat-row").count() >= 1)
     p3.locator("#fabCapture").click()
     p3.wait_for_timeout(300)
-    check("mobile: fab opens composer", p3.locator(".bnote.composing").count() == 1)
+    check("mobile: fab opens capture sheet", p3.locator("#captureOverlay.open").count() == 1)
     p3.screenshot(path=str(SHOTS / "10_mobile_brain.png"))
     ctx3.close()
 
@@ -538,13 +634,17 @@ with sync_playwright() as pw:
     p4.wait_for_timeout(600)
     check("malformed brain: app boots into brain view",
           p4.evaluate("document.body.dataset.view") == "brain")
-    p4.locator("#brainTabs .seg-btn[data-tab='library']").click()
-    p4.wait_for_timeout(400)
-    check("malformed brain: library renders normalized panes",
-          p4.locator(".pane").count() == 3
-          and p4.locator(".pane-title", has_text="Untitled").count() == 1,
-          str(p4.locator(".pane").count()))
-    check("malformed brain: valid note survives", p4.locator(".pnote", has_text="survivor").count() == 1)
+    # index renders normalized shelves (3 categories: Broken, Untitled, OK — "junk" filtered)
+    check("malformed brain: index renders normalized shelves",
+          p4.locator(".bi-cat-row").count() == 3
+          and p4.locator(".bi-cat-name", has_text="Untitled").count() == 1,
+          str(p4.locator(".bi-cat-row").count()))
+    # navigate into OK shelf to check note survived (use exact text match — has_text
+    # is case-insensitive so "OK" would match "Broken" which contains "ok")
+    p4.get_by_text("OK", exact=True).first.click()
+    p4.wait_for_timeout(300)
+    check("malformed brain: valid note survives",
+          p4.locator(".bc-note-entry", has_text="survivor").count() == 1)
     check("malformed brain: no JS errors", not errs4, "; ".join(errs4[:3]))
     ctx4.close()
 

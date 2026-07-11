@@ -36,9 +36,7 @@
       <span id="wsName" class="ws-name">Workspace</span>
       <svg class="chev" viewBox="0 0 16 16" width="14" height="14"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
     </button>
-    <div class="seg seg-sub" id="brainTabs" role="tablist" aria-label="Brain view">
-      <button class="seg-btn" data-tab="board">Board</button>
-      <button class="seg-btn" data-tab="library">Library</button>
+    <div class="seg seg-sub" id="brainTabs" role="tablist" aria-label="Brain view" aria-hidden="true" style="display:none">
     </div>
   </div>
   <div class="tb-right">
@@ -65,13 +63,32 @@
 
 <main id="viewport">
   <div id="canvas"></div>
-  <div id="library"></div>
+  <div id="library" style="display:none"></div>
 </main>
+<div id="brainRoot"></div>
 
 <div id="hint" class="canvas-hint" hidden>Double-click anywhere to start a board</div>
 
-<button id="fabCapture" class="fab" title="Write a note">
-  <svg viewBox="0 0 16 16" width="20" height="20"><path d="M9.8 2.8l3.4 3.4-7.6 7.6-3.9.5.5-3.9zM8.6 4l3.4 3.4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+<!-- Quick capture sheet (Brain) -->
+<div id="captureOverlay">
+  <div class="capture-sheet">
+    <div class="capture-head">
+      <span class="capture-label">Quick capture</span>
+      <button class="capture-close" id="captureClose">
+        <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M2 2l10 10M12 2L2 12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+      </button>
+    </div>
+    <textarea id="captureArea" placeholder="Write it down…" rows="4"></textarea>
+    <div class="capture-foot">
+      <select id="captureCatPicker"></select>
+      <span class="capture-hint">⌘↵ save</span>
+      <button id="captureSaveBtn">Save</button>
+    </div>
+  </div>
+</div>
+
+<button id="fabCapture" class="fab" title="Quick capture">
+  <svg viewBox="0 0 16 16" width="20" height="20"><path d="M8 3v10M3 8h10" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
 </button>
 
 <div id="modalRoot"></div>
