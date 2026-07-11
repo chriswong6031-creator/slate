@@ -167,6 +167,7 @@ async function _renderUserPdf(item, scroll, myGen) {
         '</div>' +
       '</div>';
   } catch (e) {
+    if (myGen !== undefined && _openGeneration !== myGen) return;
     bodyEl.innerHTML = '<p style="color:var(--danger)">Failed to load PDF: ' + D.escHtml(e.message) + '</p>';
   }
 }

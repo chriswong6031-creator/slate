@@ -381,9 +381,13 @@ async function exportBackup() {
   const files = await fileAll();
 
   // v2: also drain the library IDB (user items + PDF blobs as base64)
+  // Use SlateBackupDB directly so this works even when LibUser is not loaded (index.html).
   let library = null;
-  if (window.LibUser && typeof window.LibUser.exportAll === 'function') {
-    try { library = await window.LibUser.exportAll(); } catch (_) {}
+  const _libExporter = (window.SlateBackupDB && typeof window.SlateBackupDB.exportAll === 'function')
+    ? window.SlateBackupDB
+    : (window.LibUser && typeof window.LibUser.exportAll === 'function' ? window.LibUser : null);
+  if (_libExporter) {
+    try { library = await _libExporter.exportAll(); } catch (_) {}
   }
 
   const payload = {
@@ -407,36 +411,23 @@ async function exportBackup() {
 /* ---------- Export Brain as Markdown ---------- */
 function exportBrainMarkdown() {
   const lines = ['# Slate Brain Export', '', '**Exported:** ' + new Date().toLocaleString(), ''];
-  const ws = state.ws || [];
-  for (const w of ws) {
-    lines.push('## Workspace: ' + (w.name || 'Unnamed'));
+  const categories = (state.brain && state.brain.categories) || [];
+  for (const cat of categories) {
+    lines.push('## ' + (cat.name || 'Unnamed'));
     lines.push('');
-    const boards = w.boards || [];
-    for (const b of boards) {
-      lines.push('### Board: ' + (b.n || 'Unnamed'));
+    const notes = cat.notes || [];
+    for (const note of notes) {
+      const title = (note.title && note.title.trim())
+        ? note.title.trim()
+        : ((note.text || '').split('\n')[0].slice(0, 80) || 'Untitled');
+      lines.push('### ' + title);
+      if (note.created) lines.push('*Created: ' + new Date(note.created).toLocaleString() + '*');
+      if (note.updated && note.updated !== note.created) lines.push('*Updated: ' + new Date(note.updated).toLocaleString() + '*');
       lines.push('');
-      // Active cards
-      const cards = b.cards || [];
-      if (cards.length) {
-        lines.push('**Cards:**');
-        for (const c of cards) {
-          lines.push('- ' + (c.t || '(untitled)') + (c.due ? ' [due: ' + c.due + ']' : '') + (c.tags && c.tags.length ? ' [' + c.tags.join(', ') + ']' : ''));
-          if (c.desc && c.desc.trim()) {
-            // indent description
-            c.desc.trim().split('\n').forEach(dl => lines.push('  ' + dl));
-          }
-        }
-        lines.push('');
+      if (note.text && note.text.trim()) {
+        lines.push(note.text.trim());
       }
-      // Done cards
-      const done = b.done || [];
-      if (done.length) {
-        lines.push('**Completed (' + done.length + '):**');
-        for (const c of done) {
-          lines.push('- ~~' + (c.t || '(untitled)') + '~~');
-        }
-        lines.push('');
-      }
+      lines.push('');
     }
   }
 
@@ -481,9 +472,15 @@ function openSettings() {
           saveNow();
 
           // v2: restore library IDB data (items + PDF blobs)
+          // Use SlateBackupDB directly so this works even when LibUser is not loaded (index.html).
           let libCount = 0;
-          if (payload.library && window.LibUser && typeof window.LibUser.importAll === 'function') {
-            try { libCount = await window.LibUser.importAll(payload.library); } catch (_) {}
+          if (payload.library) {
+            const _libImporter = (window.SlateBackupDB && typeof window.SlateBackupDB.importAll === 'function')
+              ? window.SlateBackupDB
+              : (window.LibUser && typeof window.LibUser.importAll === 'function' ? window.LibUser : null);
+            if (_libImporter) {
+              try { libCount = await _libImporter.importAll(payload.library); } catch (_) {}
+            }
           }
 
           // register the undo BEFORE rendering — even if a render fails, the restore path exists

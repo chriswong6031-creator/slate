@@ -103,6 +103,9 @@
           </div>
         </button>
 
+        <!-- Offline / error notice — lives OUTSIDE the grid so renderGrid never clears it -->
+        <div id="lib-notice-slot" aria-live="polite"></div>
+
         <!-- Year-shelf + grid rendered here -->
         <div id="lib-card-grid" aria-label="Articles"></div>
 
@@ -213,6 +216,7 @@
 <!-- Toast -->
 <div id="lib-toast" role="alert" aria-live="polite"></div>
 
+<script src="js/backup-db.js"></script>
 <script src="js/library-data.js"></script>
 <script src="js/library-views.js"></script>
 <script src="js/library-reader.js"></script>
@@ -380,15 +384,19 @@ async function init() {
   let manifestErr = null;
   try {
     await D.loadManifest();
+    // Clear any stale offline notice from a previous failed load
+    const slot = document.getElementById('lib-notice-slot');
+    if (slot) slot.innerHTML = '';
   } catch (e) {
     manifestErr = e;
-    // Show an offline/error notice in the Citrini section, but continue rendering user content
-    const grid = document.getElementById('lib-card-grid');
-    if (grid) {
+    // Show an offline/error notice in the dedicated slot OUTSIDE the grid so
+    // buildSidebar/renderAll never wipe it.
+    const slot = document.getElementById('lib-notice-slot');
+    if (slot) {
       const notice = document.createElement('div');
       notice.className = 'lib-citrini-offline';
       notice.innerHTML = '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="8" cy="8" r="6"/><path d="M8 5v3.5M8 10.5v.5"/></svg> Citrini articles unavailable — ' + D.escHtml(e.message);
-      grid.appendChild(notice);
+      slot.appendChild(notice);
     }
   }
 
