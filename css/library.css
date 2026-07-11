@@ -1247,3 +1247,325 @@
   color: var(--danger, #D14D4D);
   margin: 12px 0;
 }
+
+/* ===== WAVE 2b: RESPONSIVE (UX-02) ===== */
+
+/* Hamburger button — hidden on desktop */
+#lib-sidebar-toggle {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 34px; height: 34px;
+  border-radius: 8px;
+  background: none; border: none;
+  cursor: pointer; color: var(--ink-2);
+  transition: background 120ms, color 120ms;
+  flex-shrink: 0;
+}
+#lib-sidebar-toggle:hover { background: var(--hover); color: var(--ink); }
+
+/* Sidebar overlay (mobile backdrop) */
+#lib-sidebar-backdrop {
+  display: none;
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,0.45);
+  z-index: 199;
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
+}
+#lib-sidebar-backdrop.show { display: block; }
+
+@media (max-width: 700px) {
+  /* Show hamburger */
+  #lib-sidebar-toggle { display: flex; }
+
+  /* Sidebar becomes a slide-in sheet */
+  #lib-sidebar {
+    position: fixed;
+    top: 0; left: 0; bottom: 0;
+    z-index: 200;
+    transform: translateX(-100%);
+    transition: transform 240ms cubic-bezier(0.4, 0, 0.2, 1);
+    box-shadow: 4px 0 24px rgba(0,0,0,0.18);
+    width: min(280px, 85vw);
+    flex: none;
+  }
+  #lib-sidebar.open {
+    transform: translateX(0);
+  }
+
+  /* Grid becomes single column */
+  .lib-card-grid {
+    grid-template-columns: 1fr;
+  }
+
+  /* Hero stacks vertically */
+  #lib-hero {
+    flex-direction: column;
+  }
+  .lib-hero-cover {
+    flex: none;
+    width: 100%;
+    min-height: 180px;
+  }
+  .lib-hero-body {
+    padding: 20px 20px 24px;
+  }
+  .lib-hero-title { font-size: 20px; }
+  .lib-hero-subtitle { font-size: 13px; }
+
+  /* Grid canvas padding */
+  #lib-grid-canvas { padding: 16px 12px 32px; }
+
+  /* Toolbar compact */
+  #lib-toolbar { padding: 0 12px; }
+
+  /* Search bar narrower */
+  .lib-search-wrap { width: 180px; }
+
+  /* Reader full-bleed on mobile */
+  #lib-toc {
+    display: none;
+  }
+  #lib-article {
+    padding: 24px 16px 60px;
+  }
+
+  /* List view: hide collection + reading columns */
+  .lib-list-header,
+  .lib-list-row {
+    grid-template-columns: 40px 1fr 90px;
+  }
+  .lib-list-cell:nth-child(3),
+  .lib-list-hcell:nth-child(3) { display: none; } /* collection */
+  .lib-list-cell:nth-child(5),
+  .lib-list-hcell:nth-child(5) { display: none; } /* reading time */
+
+  /* Preview panel hidden on mobile (double-click still opens reader) */
+  #lib-preview { display: none !important; }
+
+  /* Toast: full width at bottom */
+  #lib-toast {
+    left: 12px; right: 12px;
+    transform: translateY(12px);
+    width: auto;
+  }
+  #lib-toast.show {
+    transform: translateY(0);
+  }
+}
+
+/* ===== WAVE 2b: READING PROGRESS (UX-03 + FG-01 + FG-15) ===== */
+
+/* Progress ring on card cover */
+.lib-card-progress-ring {
+  position: absolute;
+  bottom: 8px; right: 8px;
+  width: 28px; height: 28px;
+  pointer-events: none;
+  z-index: 5;
+}
+.lib-card-progress-ring circle {
+  fill: none;
+  stroke-width: 3;
+  stroke-linecap: round;
+  transform-origin: 50% 50%;
+}
+.lib-card-progress-ring .ring-bg {
+  stroke: rgba(255,255,255,0.35);
+  r: 11;
+  cx: 14; cy: 14;
+}
+.lib-card-progress-ring .ring-fg {
+  stroke: var(--accent);
+  r: 11;
+  cx: 14; cy: 14;
+  transform: rotate(-90deg);
+  stroke-dasharray: 69.1; /* 2π*11 */
+  stroke-dashoffset: 69.1; /* will be set inline */
+  transition: stroke-dashoffset 300ms;
+}
+.lib-card-progress-ring.done .ring-fg { stroke: #22c55e; }
+
+/* Done badge (ring full + checkmark) */
+.lib-card-done-badge {
+  position: absolute; bottom: 8px; right: 8px;
+  width: 22px; height: 22px;
+  background: #22c55e;
+  border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  z-index: 5;
+  pointer-events: none;
+}
+.lib-card-done-badge svg { color: #fff; }
+
+/* Continue reading rail */
+#lib-continue-rail {
+  display: none;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px;
+  margin-bottom: 16px;
+  background: var(--accent-soft);
+  border: 1px solid var(--accent);
+  border-radius: 10px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+#lib-continue-rail::-webkit-scrollbar { display: none; }
+#lib-continue-rail.show { display: flex; }
+.lib-continue-label {
+  font-size: 11px; font-weight: 700; letter-spacing: 0.07em;
+  text-transform: uppercase; color: var(--accent);
+  white-space: nowrap; flex-shrink: 0;
+}
+.lib-continue-item {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 12px; border-radius: 7px;
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  cursor: pointer; flex-shrink: 0;
+  transition: border-color 120ms, background 120ms;
+  font-family: inherit;
+  font-size: 12.5px; font-weight: 500; color: var(--ink);
+}
+.lib-continue-item:hover { border-color: var(--accent); background: var(--accent-soft); }
+.lib-continue-title {
+  max-width: 160px; white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis;
+}
+.lib-continue-pct {
+  font-size: 11px; color: var(--ink-3);
+  font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+/* Mini progress bar inside continue chip */
+.lib-continue-bar-wrap {
+  width: 40px; height: 3px;
+  background: var(--line-strong); border-radius: 99px; flex-shrink: 0;
+}
+.lib-continue-bar {
+  height: 100%; background: var(--accent); border-radius: 99px;
+  transition: width 300ms;
+}
+
+/* ===== WAVE 2b: CLIP-TO-BRAIN PILL (FG-02) ===== */
+#lib-clip-pill {
+  position: fixed;
+  z-index: 9999;
+  display: none;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  background: var(--surface);
+  border: 1px solid var(--accent);
+  border-radius: 99px;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.2);
+  font-size: 12.5px; font-weight: 600; color: var(--accent);
+  cursor: pointer; font-family: inherit;
+  transition: transform 120ms, box-shadow 120ms;
+  pointer-events: auto;
+  user-select: none;
+  white-space: nowrap;
+}
+#lib-clip-pill:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 20px rgba(0,0,0,0.25);
+}
+#lib-clip-pill.show { display: flex; }
+
+/* ===== WAVE 2b: FONT SIZE CONTROLS (FG-20) ===== */
+.lib-reader-font-controls {
+  display: flex; align-items: center; gap: 2px;
+}
+.lib-font-btn {
+  display: flex; align-items: center; justify-content: center;
+  width: 30px; height: 28px; border-radius: 6px;
+  background: none; border: 1px solid var(--line-strong);
+  cursor: pointer; font-family: inherit; color: var(--ink-2);
+  transition: background 100ms, color 100ms, border-color 100ms;
+  font-weight: 600;
+  line-height: 1;
+}
+.lib-font-btn:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
+.lib-font-btn-sm { font-size: 11px; }
+.lib-font-btn-md { font-size: 13px; border-left: none; border-right: none; border-radius: 0; }
+.lib-font-btn-lg { font-size: 16px; }
+
+/* ===== WAVE 2b: NEW SINCE LAST VISIT (FG-11) ===== */
+.lib-new-dot {
+  display: inline-block;
+  width: 7px; height: 7px;
+  background: var(--accent);
+  border-radius: 50%;
+  margin-left: 5px;
+  flex-shrink: 0;
+  vertical-align: middle;
+}
+.lib-card-new-badge {
+  position: absolute; top: 8px; right: 8px;
+  background: var(--accent); color: var(--accent-ink);
+  font-size: 9px; font-weight: 700; letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 2px 6px; border-radius: 99px;
+  z-index: 6;
+}
+
+/* New since banner */
+#lib-new-since-banner {
+  display: none;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 14px;
+  margin-bottom: 12px;
+  background: var(--accent-soft);
+  border: 1px solid var(--accent);
+  border-radius: 9px;
+  font-size: 12.5px; color: var(--accent); font-weight: 600;
+}
+#lib-new-since-banner.show { display: flex; }
+.lib-new-since-dismiss {
+  background: none; border: none; cursor: pointer;
+  font-size: 16px; color: var(--accent); opacity: 0.7;
+  line-height: 1; padding: 0 2px;
+}
+.lib-new-since-dismiss:hover { opacity: 1; }
+
+/* Sidebar "new" chip */
+#lib-sb-new-chip {
+  display: inline-flex; align-items: center;
+  gap: 3px; padding: 1px 5px; border-radius: 99px;
+  background: var(--accent); color: var(--accent-ink);
+  font-size: 9px; font-weight: 700; letter-spacing: 0.04em;
+  text-transform: uppercase; flex-shrink: 0;
+}
+
+/* ===== WAVE 2b: TOAST VISUALS (UX-04) ===== */
+/* Lib-toast: match main app position (bottom-right) + pill style */
+#lib-toast {
+  bottom: 24px;
+  left: auto;
+  right: 24px;
+  transform: translateY(12px);
+  border-radius: 10px;
+  min-width: 200px;
+  max-width: 380px;
+}
+#lib-toast.show {
+  transform: translateY(0);
+}
+
+/* ===== WAVE 2b: UX-19 SKELETON + ONERROR ===== */
+/* Card cover shimmer while image loads */
+.lib-card-cover img.lib-img-loading {
+  opacity: 0;
+  transition: opacity 250ms;
+}
+.lib-card-cover img.lib-img-loaded {
+  opacity: 1;
+}
+/* The lib-skel class already handles the shimmer — reuse it on cover bg */
+.lib-card-cover.lib-cover-loading {
+  background: linear-gradient(90deg, var(--hover) 25%, var(--line) 50%, var(--hover) 75%);
+  background-size: 200% 100%;
+  animation: lib-shimmer 1.4s ease infinite;
+}

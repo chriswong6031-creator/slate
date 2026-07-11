@@ -668,6 +668,288 @@ def run(base_url: str) -> int:
         except Exception:
             pass
 
+        # ══ Wave 2b acceptance checks ═════════════════════════════════════
+
+        # ── W2b-UX15: '/' focuses search from non-input context ──────────────
+        page.goto(lib_url, wait_until='domcontentloaded')
+        page.wait_for_selector('.lib-card[data-idx]', timeout=25000)
+        page.wait_for_timeout(400)
+        # Ensure focus is NOT on an input
+        page.evaluate("() => { if (document.activeElement && document.activeElement.tagName !== 'BODY') document.activeElement.blur(); }")
+        page.keyboard.press('/')
+        page.wait_for_timeout(200)
+        focused = page.evaluate("() => document.activeElement && document.activeElement.id === 'lib-search-input'")
+        if not check('W2b-UX15: / key focuses search input', focused): failures += 1
+        # Clear search
+        page.fill('#lib-search-input', '')
+        page.wait_for_timeout(200)
+
+        # ── W2b-UX02: mobile viewport — sidebar sheet present ────────────────
+        mobile_ctx = browser.new_context(viewport={'width': 390, 'height': 844})
+        mp = mobile_ctx.new_page()
+        mp.goto(lib_url, wait_until='domcontentloaded')
+        mp.wait_for_selector('.lib-card[data-idx]', timeout=25000)
+        mp.wait_for_timeout(600)
+
+        # Hamburger should be visible
+        toggle_visible = mp.evaluate(
+            "() => { const el = document.getElementById('lib-sidebar-toggle');"
+            "  if (!el) return false;"
+            "  const s = window.getComputedStyle(el);"
+            "  return s.display !== 'none'; }")
+        if not check('W2b-UX02: mobile 390px — hamburger visible', toggle_visible): failures += 1
+
+        # Sidebar should NOT be visible (off-screen)
+        sidebar_offscreen = mp.evaluate(
+            "() => { const el = document.getElementById('lib-sidebar');"
+            "  if (!el) return False;"
+            "  return !el.classList.contains('open'); }")
+        if not check('W2b-UX02: mobile 390px — sidebar starts closed', sidebar_offscreen): failures += 1
+
+        # Open sidebar via hamburger
+        mp.click('#lib-sidebar-toggle')
+        mp.wait_for_timeout(300)
+        sidebar_open = mp.evaluate(
+            "() => document.getElementById('lib-sidebar').classList.contains('open')")
+        if not check('W2b-UX02: mobile — hamburger opens sidebar sheet', sidebar_open): failures += 1
+
+        # Escape closes sidebar
+        mp.keyboard.press('Escape')
+        mp.wait_for_timeout(300)
+        sidebar_closed = mp.evaluate(
+            "() => !document.getElementById('lib-sidebar').classList.contains('open')")
+        if not check('W2b-UX02: mobile — Escape closes sidebar sheet', sidebar_closed): failures += 1
+
+        # Reader should show no TOC rail on mobile
+        first_unlocked = next((i for i in items if not i.get('locked')), None)
+        if first_unlocked:
+            mp.goto(lib_url + '#/read/' + first_unlocked['id'], wait_until='domcontentloaded')
+            try: mp.wait_for_selector('#lib-reader.open', timeout=20000)
+            except Exception: pass
+            mp.wait_for_timeout(800)
+            toc_hidden = mp.evaluate(
+                "() => { const el = document.getElementById('lib-toc');"
+                "  if (!el) return true;"
+                "  const s = window.getComputedStyle(el);"
+                "  return s.display === 'none'; }")
+            if not check('W2b-UX02: mobile reader — ToC rail hidden', toc_hidden): failures += 1
+
+        mobile_ctx.close()
+
+        # ── W2b-FG01/UX03: reading progress saved + restored ─────────────────
+        page.goto(lib_url, wait_until='domcontentloaded')
+        page.wait_for_selector('.lib-card[data-idx]', timeout=25000)
+        page.wait_for_timeout(400)
+
+        # Open a non-locked article and scroll to 50%
+        if first_unlocked:
+            page.goto(lib_url + '#/read/' + first_unlocked['id'], wait_until='domcontentloaded')
+            try: page.wait_for_selector('#lib-reader.open', timeout=20000)
+            except Exception: pass
+            page.wait_for_timeout(1000)
+
+            # Scroll the reader to 50%
+            page.evaluate(
+                "() => { const el = document.getElementById('lib-reader-scroll');"
+                "  if (!el) return;"
+                "  el.scrollTop = Math.floor((el.scrollHeight - el.clientHeight) * 0.5); }")
+            page.wait_for_timeout(1500)  # allow throttled write (1s)
+
+            # Check progress key was written
+            prog_written = page.evaluate(
+                "() => { try {"
+                "  const p = JSON.parse(localStorage.getItem('slate.library.progress.v1') || '{}');"
+                "  const keys = Object.keys(p);"
+                "  return keys.length > 0 && p[keys[0]].pct > 0;"
+                "} catch(_) { return false; } }")
+            if not check('W2b-FG01: reading progress written to localStorage', prog_written): failures += 1
+
+            # Close reader and reopen — scroll should restore
+            page.keyboard.press('Escape')
+            page.wait_for_timeout(400)
+            page.goto(lib_url + '#/read/' + first_unlocked['id'], wait_until='domcontentloaded')
+            try: page.wait_for_selector('#lib-reader.open', timeout=20000)
+            except Exception: pass
+            page.wait_for_timeout(1200)  # allow rAF restore
+
+            scroll_restored = page.evaluate(
+                "() => { const el = document.getElementById('lib-reader-scroll');"
+                "  if (!el) return false;"
+                "  return el.scrollTop > 100; }")  # any non-trivial scroll position
+            if not check('W2b-UX03: reading position restored on reopen', scroll_restored): failures += 1
+
+        # ── W2b-FG01: progress ring visible on card after reading ─────────────
+        page.keyboard.press('Escape')
+        page.wait_for_timeout(400)
+        page.goto(lib_url, wait_until='domcontentloaded')
+        page.wait_for_selector('.lib-card[data-idx]', timeout=25000)
+        page.wait_for_timeout(500)
+
+        ring_visible = page.evaluate(
+            "() => document.querySelector('.lib-card-progress-ring, .lib-card-done-badge') !== null")
+        if not check('W2b-FG01: progress ring/badge shows on card after reading', ring_visible): failures += 1
+
+        # ── W2b-FG15: continue reading rail shows ────────────────────────────
+        rail_visible = page.evaluate(
+            "() => { const el = document.getElementById('lib-continue-rail');"
+            "  return el && el.classList.contains('show'); }")
+        if not check('W2b-FG15: continue reading rail visible', rail_visible): failures += 1
+
+        # ── W2b-FG02: clip-to-brain pill writes inbox key ─────────────────────
+        if first_unlocked:
+            page.goto(lib_url + '#/read/' + first_unlocked['id'], wait_until='domcontentloaded')
+            try: page.wait_for_selector('#lib-reader.open', timeout=20000)
+            except Exception: pass
+            page.wait_for_timeout(1000)
+
+            # Simulate text selection + pill click via JS (mouseup programmatic)
+            page.evaluate(
+                "() => {"
+                "  const body = document.getElementById('lib-article-body');"
+                "  if (!body) return;"
+                "  const range = document.createRange();"
+                "  const textNode = body.querySelector('p') || body.firstChild;"
+                "  if (!textNode) return;"
+                "  range.selectNodeContents(textNode);"
+                "  const sel = window.getSelection();"
+                "  sel.removeAllRanges();"
+                "  sel.addRange(range);"
+                "  body.dispatchEvent(new MouseEvent('mouseup', {bubbles: true}));"
+                "}")
+            page.wait_for_timeout(300)
+
+            pill_visible = page.evaluate(
+                "() => { const p = document.getElementById('lib-clip-pill');"
+                "  return p && p.classList.contains('show'); }")
+            if not check('W2b-FG02: clip pill appears on text selection', pill_visible): failures += 1
+
+            if pill_visible:
+                page.click('#lib-clip-pill')
+                page.wait_for_timeout(300)
+                inbox_written = page.evaluate(
+                    "() => { try {"
+                    "  const raw = localStorage.getItem('slate.brain.inbox.v1');"
+                    "  if (!raw) return false;"
+                    "  const q = JSON.parse(raw);"
+                    "  return Array.isArray(q) && q.length > 0 && typeof q[0].text === 'string' && q[0].text.length > 0;"
+                    "} catch(_) { return false; } }")
+                if not check('W2b-FG02: clip pill writes to slate.brain.inbox.v1', inbox_written): failures += 1
+                # cleanup
+                page.evaluate("() => localStorage.removeItem('slate.brain.inbox.v1')")
+            else:
+                failures += 1
+                print('  [FAIL] W2b-FG02: inbox key — pill not shown, skipping click')
+
+        # ── W2b-FG20: font size controls persist ──────────────────────────────
+        # Should already have reader open; if not, reopen
+        reader_open_now = page.evaluate("() => document.getElementById('lib-reader').classList.contains('open')")
+        if not reader_open_now and first_unlocked:
+            page.goto(lib_url + '#/read/' + first_unlocked['id'], wait_until='domcontentloaded')
+            try: page.wait_for_selector('#lib-reader.open', timeout=20000)
+            except Exception: pass
+            page.wait_for_timeout(800)
+
+        # Get current font size
+        font_before = page.evaluate(
+            "() => { const b = document.getElementById('lib-article-body');"
+            "  return b ? parseFloat(window.getComputedStyle(b).fontSize) : 0; }")
+
+        # Click A+ (larger)
+        larger_btn = page.query_selector('.lib-font-btn[data-action="larger"]')
+        if larger_btn:
+            larger_btn.click()
+            page.wait_for_timeout(200)
+            font_after = page.evaluate(
+                "() => { const b = document.getElementById('lib-article-body');"
+                "  return b ? parseFloat(window.getComputedStyle(b).fontSize) : 0; }")
+            font_increased = font_after > font_before
+            if not check('W2b-FG20: A+ increases font size', font_increased,
+                         f'before={font_before} after={font_after}'): failures += 1
+
+            # Check prefs key written
+            prefs_written = page.evaluate(
+                "() => { try {"
+                "  const p = JSON.parse(localStorage.getItem('slate.library.reader.prefs') || '{}');"
+                "  return typeof p.fontSize === 'number' && p.fontSize > 16;"
+                "} catch(_) { return false; } }")
+            if not check('W2b-FG20: font pref persisted to localStorage', prefs_written): failures += 1
+
+            # Reset with A (middle button)
+            reset_btn = page.query_selector('.lib-font-btn[data-action="reset"]')
+            if reset_btn:
+                reset_btn.click()
+                page.wait_for_timeout(200)
+        else:
+            failures += 2
+            print('  [FAIL] W2b-FG20: font A+ button not found')
+
+        # ── W2b-FG11: new-since mechanism present ─────────────────────────────
+        # The banner and chip require a prior lastSeen + new items — we can only
+        # verify the mechanism exists (key written, banner DOM present)
+        page.keyboard.press('Escape')
+        page.wait_for_timeout(300)
+        page.goto(lib_url, wait_until='domcontentloaded')
+        page.wait_for_selector('.lib-card[data-idx]', timeout=25000)
+        page.wait_for_timeout(500)
+
+        last_seen_written = page.evaluate(
+            "() => localStorage.getItem('slate.library.lastSeen.v1') !== null")
+        if not check('W2b-FG11: slate.library.lastSeen.v1 written on load', last_seen_written): failures += 1
+
+        banner_dom = page.evaluate(
+            "() => document.getElementById('lib-new-since-banner') !== null")
+        if not check('W2b-FG11: new-since banner DOM present', banner_dom): failures += 1
+
+        # ── W2b-UX04: toast position (bottom-right) ───────────────────────────
+        # Trigger a toast by creating and immediately deleting a user post
+        page.goto(lib_url, wait_until='domcontentloaded')
+        page.wait_for_selector('.lib-card[data-idx]', timeout=25000)
+        page.wait_for_timeout(400)
+        page.click('#lib-sb-new-post')
+        page.wait_for_timeout(300)
+        page.fill('#lib-c-title', 'W2b Toast Test')
+        page.click('#lib-composer-save')
+        page.wait_for_timeout(500)
+        toast_el = page.query_selector('#lib-toast.show')
+        if toast_el:
+            toast_rect = toast_el.bounding_box()
+            vp_width = page.viewport_size['width']
+            vp_height = page.viewport_size['height']
+            # bottom-right: right edge > 50% of viewport width
+            toast_right_aligned = toast_rect and (toast_rect['x'] + toast_rect['width']) > vp_width * 0.5
+            if not check('W2b-UX04: toast appears bottom-right of viewport',
+                         toast_right_aligned,
+                         f'rect={toast_rect}'): failures += 1
+        else:
+            if not check('W2b-UX04: toast appears on action', toast_el is not None): failures += 1
+
+        # Cleanup the test post
+        page.evaluate(
+            "async () => {"
+            "  if (!window.LibUser) return;"
+            "  const items = window.LibUser.getUserItems();"
+            "  const t = items.find(i => i.title === 'W2b Toast Test');"
+            "  if (t) await window.LibUser.deleteItem(t.id);"
+            "}")
+        page.wait_for_timeout(7000)  # let undo expire
+
+        # ── W2b-UX19: cover img has loading=lazy + onerror spine fallback ─────
+        page.goto(lib_url, wait_until='domcontentloaded')
+        page.wait_for_selector('.lib-card[data-idx]', timeout=25000)
+        page.wait_for_timeout(500)
+        # Check that at least one card img has loading=lazy
+        lazy_imgs = page.evaluate(
+            "() => document.querySelectorAll('.lib-card-cover img[loading=\"lazy\"]').length")
+        if not check('W2b-UX19: card cover images have loading=lazy', lazy_imgs > 0,
+                     f'count={lazy_imgs}'): failures += 1
+        # Check that spine fallback exists inside covers with images
+        spine_in_img_card = page.evaluate(
+            "() => { const covers = document.querySelectorAll('.lib-card-cover');"
+            "  for (const c of covers) {"
+            "    if (c.querySelector('img') && c.querySelector('.lib-card-spine')) return true;"
+            "  } return false; }")
+        if not check('W2b-UX19: card covers with img have spine onerror fallback', spine_in_img_card): failures += 1
+
         browser.close()
 
     return failures
