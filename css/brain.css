@@ -95,7 +95,13 @@ body[data-view="brain"] .fab { display: flex; }
   box-shadow: var(--shadow-card-hover);
   transform: translateY(-1px);
 }
-.bi-all-notes { border-style: dashed; }
+.bi-all-notes {
+  border-style: dashed;
+  /* appended as a sibling of .bi-cat-list — needs the same centered column */
+  max-width: calc(860px - 64px);
+  margin: 0 auto 10px;
+  width: calc(100% - 64px);
+}
 .bi-cat-bar {
   width: 4px;
   flex-shrink: 0;

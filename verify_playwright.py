@@ -423,6 +423,49 @@ with sync_playwright() as pw:
     check("brain: editor title persisted across reload",
           page.locator(".bc-note-entry .bc-note-title", has_text="Rate cycle thesis").count() == 1)
 
+    # editor flush on abrupt close: pagehide fires BEFORE the autosave debounce —
+    # the flush handler must persist synchronously or the last keystrokes die
+    page.locator(".bc-note-entry .bc-note-title", has_text="Rate cycle thesis").click()
+    page.wait_for_timeout(400)
+    page.locator(".be-body").click()
+    page.keyboard.type(" FLUSHGUARD")
+    page.evaluate("window.dispatchEvent(new Event('pagehide'))")
+    page.reload()
+    page.wait_for_timeout(600)
+    flushed = page.evaluate(
+        "() => JSON.stringify(state.brain.categories).includes('FLUSHGUARD')")
+    check("brain: editor flush on abrupt close (no data loss)", flushed)
+
+    # composer draft survives abrupt close (synchronous shadow-push to localStorage)
+    page.keyboard.press("Escape")
+    page.wait_for_timeout(200)
+    page.keyboard.press("Escape")
+    page.wait_for_timeout(200)
+    if page.locator("#bcComposerArea").count() == 0:
+        page.locator(".bi-cat-row", has_text="Markets").click()
+        page.wait_for_timeout(300)
+    page.locator("#bcComposerArea").fill("DRAFTGUARD unsaved composer text")
+    page.reload()
+    page.wait_for_timeout(600)
+    if page.locator("#bcComposerArea").count() == 0:
+        page.locator(".bi-cat-row", has_text="Markets").click()
+        page.wait_for_timeout(300)
+    check("brain: composer draft survives abrupt close",
+          "DRAFTGUARD" in (page.locator("#bcComposerArea").input_value() or ""))
+    page.locator("#bcComposerArea").fill("")
+    page.wait_for_timeout(150)
+
+    # All Notes row sits in the same centered column as the shelf rows
+    page.keyboard.press("Escape")
+    page.wait_for_timeout(300)
+    an_box = page.locator(".bi-all-notes").bounding_box()
+    row_box = page.locator(".bi-cat-row").first.bounding_box()
+    aligned = bool(an_box and row_box
+                   and abs(an_box["x"] - row_box["x"]) < 8
+                   and abs(an_box["width"] - row_box["width"]) < 16)
+    check("brain: All Notes row aligns with shelf column", aligned,
+          f"an_x={an_box and round(an_box['x'])} row_x={row_box and round(row_box['x'])}")
+
     # duplicate shelf rename blocked
     page.keyboard.press("Escape")
     page.wait_for_timeout(200)

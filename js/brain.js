@@ -113,7 +113,7 @@ function renderBrainIndex() {
   const header = el('div', 'bi-header');
   const htitle = el('div', 'bi-title');
   htitle.appendChild(el('span', null, 'Brain'));
-  const hsub = el('div', 'bi-sub', cats.length + (cats.length === 1 ? ' shelf' : ' shelves') + ' · ' + totalNotes + ' notes total');
+  const hsub = el('div', 'bi-sub', cats.length + (cats.length === 1 ? ' shelf' : ' shelves') + ' · ' + totalNotes + (totalNotes === 1 ? ' note total' : ' notes total'));
   const newBtn = el('button', 'bi-new-btn');
   newBtn.appendChild(brainSvg('M7 2v10M2 7h10', 13, 13, 1.6));
   newBtn.appendChild(el('span', null, 'New shelf'));
@@ -325,6 +325,8 @@ function renderBrainCategory() {
     ta.id = 'bcComposerArea';
     ta.placeholder = 'Write it down…';
     ta.rows = 2;
+    const draft = readComposerDraft();
+    if (draft && draft.catId === brainCatId) ta.value = draft.text;
     ta.addEventListener('input', () => {
       autoGrowTa(ta);
       scheduleShadowPush();
@@ -383,9 +385,15 @@ function noteEntryEl(note, idx, showCat) {
   head.append(title, age);
 
   const snippet = el('div', 'bc-note-snippet');
-  const snippetText = note.text.replace(/\n+/g, ' ');
+  // Untitled notes derive their title from the first line — the snippet starts
+  // at the second line so the row doesn't repeat itself.
+  const snippetSource = (note.title && note.title.trim())
+    ? note.text
+    : note.text.split('\n').slice(1).join(' ');
+  const snippetText = snippetSource.replace(/\n+/g, ' ').trim();
   snippet.textContent = snippetText.length > 160 ? snippetText.slice(0, 160) + '…' : snippetText;
   entry.append(head, snippet);
+  if (!snippetText) snippet.remove();
 
   if (showCat) {
     const f = findNote(note.id);
@@ -439,22 +447,28 @@ function deleteCat(cat) {
   undoableToast(msg, () => state.brain.categories.splice(clamp(idx, 0, state.brain.categories.length), 0, cat));
 }
 
-/* ─── SHADOW PUSH (composer instant persist) ─── */
-let _composerDraftCatId = null;
-let _composerDraftText = '';
-let _shadowPushTimer = null;
+/* ─── SHADOW PUSH (composer draft persist) ───
+   The quick-write composer must never lose text: every input synchronously
+   stashes the draft to localStorage (a tiny string — sync write is cheap and
+   leaves no timing window on abrupt close). saveFromComposer clears it;
+   renderBrainCategory restores it into the composer. */
+const BRAIN_DRAFT_KEY = 'slate.brain.draft.v1';
 function scheduleShadowPush() {
   const ta = $('#bcComposerArea');
   if (!ta) return;
-  _composerDraftCatId = brainCatId;
-  _composerDraftText = ta.value;
-  clearTimeout(_shadowPushTimer);
-  _shadowPushTimer = setTimeout(() => {
-    // text is already in the textarea; state save is not required for the shadow-push law
-    // (the law says "hits state + saveState within 400ms debounce")
-    // We don't save a partial draft to state — saveFromComposer does the final save.
-    // The shadow-push requirement is fulfilled by the editor autosave (below).
-  }, 350);
+  try {
+    if (ta.value) localStorage.setItem(BRAIN_DRAFT_KEY, JSON.stringify({ catId: brainCatId, text: ta.value, ts: Date.now() }));
+    else localStorage.removeItem(BRAIN_DRAFT_KEY);
+  } catch (e) { /* quota/private mode — draft is best-effort */ }
+}
+function readComposerDraft() {
+  try {
+    const d = JSON.parse(localStorage.getItem(BRAIN_DRAFT_KEY));
+    return (d && typeof d.text === 'string' && d.text) ? d : null;
+  } catch (e) { return null; }
+}
+function clearComposerDraft() {
+  try { localStorage.removeItem(BRAIN_DRAFT_KEY); } catch (e) {}
 }
 
 function saveFromComposer() {
@@ -467,6 +481,7 @@ function saveFromComposer() {
   const note = newNote(text);
   cat.notes.unshift(note);
   save();
+  clearComposerDraft();
   ta.value = '';
   autoGrowTa(ta);
   renderBrainCategory();
@@ -594,7 +609,10 @@ function flushEditorSave(note) {
   else delete note.title;
   note.text = newText;
   note.updated = Date.now();
-  save();
+  // Synchronous persist: flush runs from pagehide/visibilitychange, where a
+  // debounced save() would die with the page (and core's own pagehide flush
+  // has already run by the time this listener fires).
+  saveNow();
   _editorDirty = false;
   const updEl = $('#beUpdated');
   if (updEl) updEl.textContent = 'Updated ' + relTime(note.updated);
