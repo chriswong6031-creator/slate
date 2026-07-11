@@ -1081,9 +1081,18 @@ def run(base_url: str, fixture: bool = False) -> int:
         # Simulate a controllerchange event by dispatching it programmatically.
         # Real SW takeover happens between deploys; here we test that the toast
         # appears when the event fires — the wiring is what matters.
+        # We spoof navigator.serviceWorker.controller to be truthy at page load
+        # so hadControllerAtLoad=true (simulating a returning visitor whose SW
+        # was just replaced by a new version).
         print()
         print('  ── C6: SW update toast ──────────────────────────────────────────')
         ctx_c6 = browser.new_context(viewport={'width': 1440, 'height': 900})
+        # Make navigator.serviceWorker.controller truthy before the page script runs
+        # so hadControllerAtLoad captures true — simulating a page that already had
+        # an active SW when it loaded (i.e. a returning visitor receiving an update).
+        ctx_c6.add_init_script(
+            "Object.defineProperty(navigator.serviceWorker, 'controller',"
+            " { get: () => ({ scriptURL: location.origin + '/sw.js' }), configurable: true });")
         p_c6 = ctx_c6.new_page()
         p_c6.goto(lib_url, wait_until='domcontentloaded')
         p_c6.wait_for_selector('.lib-card[data-idx]', timeout=25000)

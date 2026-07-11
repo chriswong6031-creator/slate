@@ -107,17 +107,22 @@
 <script src="js/app.js"></script>
 <script id="sw-register">
 if ('serviceWorker' in navigator && location.protocol !== 'file:') {
+  // C6: capture whether a SW was already controlling the page at load time.
+  // skipWaiting()+clients.claim() fires controllerchange on the FIRST install too;
+  // we only want the toast when an EXISTING SW was REPLACED (i.e. a real update).
+  const hadControllerAtLoad = !!navigator.serviceWorker.controller;
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('sw.js').catch((e) => console.warn('Slate: SW registration failed', e));
   });
   // C6: update toast on controllerchange (new SW took over via skipWaiting+claim).
   // No auto-reload — reloading mid-edit would destroy unsaved card/note content.
   navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (!hadControllerAtLoad) return; // first-ever install — not an update
     if (window._swUpdateShown) return;
     window._swUpdateShown = true;
     if (typeof toast === 'function') {
       toast('Slate updated — ', {
-        ms: 0,
+        persist: true,
         action: { label: 'Reload', fn: () => location.reload() },
       });
     }

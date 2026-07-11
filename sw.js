@@ -3,7 +3,7 @@
    any source change produces a new cache and an immediate takeover. */
 'use strict';
 
-const VERSION = 'slate-411507b4cf';
+const VERSION = 'slate-c3cfc63272';
 const ASSETS = [
   './',
   './index.html',
@@ -51,10 +51,12 @@ self.addEventListener('fetch', (e) => {
   if (e.request.method !== 'GET') return;
   const url = new URL(e.request.url);
   if (url.origin !== self.location.origin) return;
-  // C4: Library DATA (/library/manifest.json, /library/articles/*, /library/assets/*)
-  // stays NETWORK-ONLY — never precached (1 GB store not in git/cache).
+  // C4: Library DATA (/library/manifest.json, /library/articles/*, /library/assets/*,
+  // /library/search/*) stays NETWORK-ONLY — never precached (1 GB store not in git/cache).
   // The shell (library.html + js/css) is in ASSETS and serves offline via cache-first.
-  if (url.pathname.startsWith('/library/')) {
+  // Use pathname.includes('/library/') so this works whether the app is deployed at root
+  // or under a subpath; the explicit check for .html prevents matching library.html itself.
+  if (url.pathname.includes('/library/') && !url.pathname.endsWith('.html')) {
     e.respondWith(fetch(e.request));
     return;
   }
