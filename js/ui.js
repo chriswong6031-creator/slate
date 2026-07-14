@@ -46,8 +46,16 @@ function openPopover(anchor, build, opts) {
   };
   build(pop, close);
   const r = anchor.getBoundingClientRect();
-  pop.style.top = Math.min(r.bottom + 6, window.innerHeight - pop.offsetHeight - 12) + 'px';
-  pop.style.left = clamp(r.left, 8, window.innerWidth - pop.offsetWidth - 8) + 'px';
+  if (opts && opts.placement === 'right') {
+    // side popover: to the right of the anchor, flipping left if it won't fit
+    let left = r.right + 8;
+    if (left + pop.offsetWidth > window.innerWidth - 8) left = r.left - pop.offsetWidth - 8;
+    pop.style.left = clamp(left, 8, window.innerWidth - pop.offsetWidth - 8) + 'px';
+    pop.style.top = clamp(r.top, 8, window.innerHeight - pop.offsetHeight - 12) + 'px';
+  } else {
+    pop.style.top = Math.min(r.bottom + 6, window.innerHeight - pop.offsetHeight - 12) + 'px';
+    pop.style.left = clamp(r.left, 8, window.innerWidth - pop.offsetWidth - 8) + 'px';
+  }
   requestAnimationFrame(() => pop.classList.add('show'));
   // stopPropagation so a dismiss-click on a popover layered over a modal doesn't
   // also reach the modal backdrop's mousedown handler and close the modal too
@@ -110,6 +118,7 @@ function completeCard(cardId) {
   const node = $('.card[data-id="' + cardId + '"]');
   const doMove = () => {
     delete found.card._completing;
+    forgetCardUiState(cardId); // leaving the active list — drop its transient expand state
     const idx = found.board.cards.indexOf(found.card);
     if (idx >= 0) found.board.cards.splice(idx, 1);
     found.card.completed = Date.now();
@@ -348,17 +357,11 @@ function openBoardMenu(anchor, board) {
       const node = $('.board[data-id="' + board.id + '"]');
       if (node) startBoardRename(node, board, false);
     }));
-    pop.appendChild(popItem((board.desc && board.desc.trim())
-      ? (board.showDesc ? 'Hide description' : 'Show description')
-      : 'Add description…', ICONS.text, () => {
+    pop.appendChild(popItem(board.showCardDescs ? 'Hide note descriptions' : 'Show note descriptions', ICONS.text, () => {
       close();
-      if (board.desc && board.desc.trim()) {
-        board.showDesc = !board.showDesc;
-        save();
-        rerenderBoard(board.id);
-      } else {
-        openBoardSettings(board, { focus: 'desc' });
-      }
+      board.showCardDescs = !board.showCardDescs;
+      save();
+      rerenderBoard(board.id);
     }));
     pop.appendChild(popItem(board.collapsed ? 'Expand board' : 'Collapse board',
       board.collapsed ? 'M4 6l4 4 4-4' : 'M4 10l4-4 4 4', () => {
@@ -430,26 +433,15 @@ function openBoardSettings(board, opts) {
   nameSec.appendChild(nameInput);
   body.appendChild(nameSec);
 
-  /* description + show-on-board toggle */
-  const descSec = section('Description');
-  const desc = el('textarea', 'modal-desc');
-  desc.rows = 3;
-  desc.placeholder = 'Add a description for this board…';
-  desc.value = board.desc || '';
-  desc.addEventListener('input', () => {
-    board.desc = desc.value;
-    save();
-    if (board.showDesc) rerenderBoard(board.id);
-  });
-  descSec.appendChild(desc);
-  autoGrow(desc);
-  const showToggle = toggleRow('Show description on the board', board.showDesc, (on) => {
-    board.showDesc = on;
+  /* notes: show each note's own description on the board */
+  const notesSec = section('Notes');
+  const showDescToggle = toggleRow('Show note descriptions', board.showCardDescs, (on) => {
+    board.showCardDescs = on;
     save();
     rerenderBoard(board.id);
   });
-  descSec.appendChild(showToggle);
-  body.appendChild(descSec);
+  notesSec.appendChild(showDescToggle);
+  body.appendChild(notesSec);
 
   /* accent color */
   const colorSec = section('Accent color');
@@ -513,8 +505,8 @@ function openBoardSettings(board, opts) {
   }
   window.addEventListener('keydown', onKey);
 
-  if (opts.focus === 'desc') { desc.focus(); }
-  else { nameInput.focus(); nameInput.setSelectionRange(nameInput.value.length, nameInput.value.length); }
+  nameInput.focus();
+  nameInput.setSelectionRange(nameInput.value.length, nameInput.value.length);
 }
 
 // A labeled on/off switch used in the board settings modal.
@@ -567,8 +559,7 @@ function toggleRow(labelText, initial, onChange) {
     const n = await addAttachmentsToCard(found.card, e.dataTransfer.files);
     if (n) {
       rerenderBoard(found.board.id);
-      const openModal = $('.modal[data-card-id="' + found.card.id + '"]');
-      if (openModal && typeof refreshModalAttachments === 'function') refreshModalAttachments(found.card);
+      if (typeof _refreshFeaturesAtts === 'function' && _refreshFeaturesAtts) _refreshFeaturesAtts(found.card);
       toast(n === 1 ? 'File attached' : n + ' files attached');
     }
   });
@@ -619,13 +610,27 @@ function toggleRow(labelText, initial, onChange) {
       undoableToast(cleared.length + ' completed cards cleared', () => { board.done = cleared.concat(board.done); });
       return;
     }
-    const cardNode = e.target.closest('.card');
-    if (cardNode && !cardNode.classList.contains('done-card') && !e.target.closest('button')) {
-      openCardModal(cardNode.dataset.id, cardNode.getBoundingClientRect());
+    // ⊕ features popover (color / due / tags / attachments)
+    const featBtn = e.target.closest('.card-feat-btn');
+    if (featBtn) { openCardFeatures(featBtn, featBtn.closest('.card').dataset.id); return; }
+    // description "Show more" / "Show less" — swap text in place; the set keeps
+    // the choice sticky across a re-render (e.g. after editing the description)
+    const moreBtn = e.target.closest('.card-desc-more');
+    if (moreBtn) {
+      const cardId = moreBtn.closest('.card').dataset.id;
+      const textEl = $('.card-desc-text', moreBtn.parentNode);
+      const full = moreBtn.textContent === 'Show less';
+      if (full) { _expandedDescs.delete(cardId); if (textEl) textEl.textContent = moreBtn.dataset.short; moreBtn.textContent = 'Show more'; }
+      else { _expandedDescs.add(cardId); if (textEl) textEl.textContent = moreBtn.dataset.full; moreBtn.textContent = 'Show less'; }
       return;
     }
-    if (cardNode && cardNode.classList.contains('done-card') && !e.target.closest('button')) {
-      openCardModal(cardNode.dataset.id, cardNode.getBoundingClientRect());
+    const cardNode = e.target.closest('.card');
+    if (cardNode && cardNode.classList.contains('done-card')) {
+      if (!e.target.closest('button, a')) openCardFeatures(cardNode, cardNode.dataset.id);
+      return;
+    }
+    if (cardNode && !e.target.closest('button, a, input, textarea')) {
+      handleNoteClick(e, cardNode, board);
     }
   });
 
@@ -675,3 +680,103 @@ function openCanvasMenu(clientX, clientY) {
     }
   });
 }
+
+/* ---------- inline note editing (no modal) ----------
+   A collapsed note opens (ledger) on click; an open note edits title/description
+   directly, and the ⊕/hover popover holds color, due date, tags, attachments. */
+function handleNoteClick(e, cardNode, board) {
+  const found = findCard(cardNode.dataset.id);
+  if (!found) return;
+  const card = found.card;
+  if (!isCardExpanded(card, board)) {
+    _expandedCards.add(card.id);         // first press expands the note
+    rerenderBoard(board.id);
+    return;
+  }
+  if (e.target.closest('.card-title')) { startTitleEdit(cardNode, card, board); return; }
+  if (e.target.closest('.card-desc-text') || e.target.closest('.card-desc-wrap')) { startDescEdit(cardNode, card, board); return; }
+  // clicked an empty region of an open note → collapse it (unless the board
+  // forces every note open)
+  if (!board.showCardDescs) { _expandedCards.delete(card.id); rerenderBoard(board.id); }
+}
+
+function startTitleEdit(cardNode, card, board) {
+  const titleEl = $('.card-title', cardNode);
+  if (!titleEl) return;
+  const ta = el('textarea', 'card-title-inline');
+  ta.value = card.t;
+  ta.rows = 1;
+  titleEl.replaceWith(ta);
+  autoGrow(ta);
+  ta.focus();
+  ta.setSelectionRange(ta.value.length, ta.value.length);
+  let done = false;
+  const commit = () => {
+    if (done) return; done = true;
+    card.t = ta.value.trim() || card.t || 'Untitled';
+    save();
+    rerenderBoard(board.id);
+  };
+  ta.addEventListener('blur', commit);
+  ta.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); ta.blur(); }
+    else if (e.key === 'Escape') { ta.value = card.t; ta.blur(); }
+  });
+}
+
+function startDescEdit(cardNode, card, board) {
+  const wrap = $('.card-desc-wrap', cardNode);
+  if (!wrap) return;
+  const ta = el('textarea', 'card-desc-inline');
+  ta.value = card.d || '';
+  ta.placeholder = 'Add a description…';
+  ta.rows = 2;
+  wrap.replaceWith(ta);
+  autoGrow(ta);
+  ta.focus();
+  ta.setSelectionRange(ta.value.length, ta.value.length);
+  let done = false;
+  const commit = () => {
+    if (done) return; done = true;
+    card.d = ta.value;
+    save();
+    rerenderBoard(board.id);
+  };
+  ta.addEventListener('blur', commit);
+  ta.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') { ta.value = card.d || ''; ta.blur(); }         // Enter = newline
+    else if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); ta.blur(); }
+  });
+}
+
+/* desktop: dwell-hover a note to reveal its features popover (touch uses the ⊕ button) */
+(function noteHoverFeatures() {
+  if (!window.matchMedia || !window.matchMedia('(hover: hover) and (pointer: fine)').matches) return;
+  const canvas = $('#canvas');
+  let timer = null, overId = null;
+  const cancelDwell = () => { clearTimeout(timer); overId = null; };
+  // any press (drag / click / resize) cancels a pending dwell so it can't fire
+  // spuriously mid-drag or after the pointer stream is interrupted
+  canvas.addEventListener('pointerdown', cancelDwell, true);
+  canvas.addEventListener('pointerover', (e) => {
+    if (e.pointerType && e.pointerType !== 'mouse') return;
+    const cardNode = e.target.closest('.card:not(.done-card)');
+    if (!cardNode || cardNode.dataset.id === overId) return;
+    overId = cardNode.dataset.id;
+    clearTimeout(timer);
+    timer = setTimeout(() => {
+      if (activePopoverClose) return;                         // don't swap over an open popover
+      if (document.body.classList.contains('dragging-any')) return;
+      if ($('.card-title-inline') || $('.card-desc-inline')) return; // mid inline-edit
+      const node = $('.card[data-id="' + overId + '"]');
+      if (!node || !node.matches(':hover')) return;
+      openCardFeatures($('.card-feat-btn', node) || node, overId);
+    }, 500);
+  });
+  canvas.addEventListener('pointerout', (e) => {
+    const cardNode = e.target.closest('.card');
+    if (cardNode && (!e.relatedTarget || !cardNode.contains(e.relatedTarget)) && cardNode.dataset.id === overId) {
+      overId = null; clearTimeout(timer);
+    }
+  });
+})();

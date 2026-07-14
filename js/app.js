@@ -1,197 +1,125 @@
 /* Slate — card modal, workspace switcher, settings, export/import, init */
 'use strict';
 
-/* ---------- card modal ---------- */
-let refreshModalAttachments = null;
+/* ---------- card feature controls (color / due / tags / attachments) ----------
+   These live in a side popover — hover-reveal on desktop, ⊕ button on touch —
+   instead of a modal. Title and description are edited inline on the note. */
+let _refreshFeaturesAtts = null; // lets a window-level file drop refresh an open popover
 
-// Transform that maps `toRect` (a resting element) onto `fromRect` (its origin),
-// with transform-origin at 0 0 — the heart of the card→editor expand animation.
-function _flipTransform(fromRect, toRect) {
-  const scale = Math.max(0.08, Math.min(1, fromRect.width / toRect.width));
-  return 'translate(' + (fromRect.left - toRect.left) + 'px,' + (fromRect.top - toRect.top) + 'px) scale(' + scale + ')';
-}
-function _reducedMotion() {
-  return window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+function _featSection(label) {
+  const s = el('div', 'feat-section');
+  s.appendChild(el('div', 'feat-label', label));
+  return s;
 }
 
-function openCardModal(cardId, sourceRect) {
-  const found = findCard(cardId);
-  if (!found) return;
-  const { card, board } = found;
-  const root = $('#modalRoot');
-  root.textContent = '';
-
-  const backdrop = el('div', 'modal-backdrop');
-  const modal = el('div', 'modal' + (card.color ? ' tint-' + card.color : ''));
-  modal.dataset.cardId = card.id;
-  const accent = el('div', 'modal-accent');
-  modal.appendChild(accent);
-
-  /* close button (visible X in top-right corner) */
-  const closeBtnEl = el('button', 'modal-close-btn');
-  closeBtnEl.title = 'Close';
-  closeBtnEl.setAttribute('aria-label', 'Close');
-  closeBtnEl.appendChild(svgIcon(ICONS.x, 13, 2));
-  closeBtnEl.addEventListener('click', () => closeModal());
-  modal.appendChild(closeBtnEl);
-
-  const body = el('div', 'modal-body');
-  modal.appendChild(body);
-
-  /* title */
-  const title = el('textarea', 'modal-title');
-  title.rows = 1;
-  title.value = card.t;
-  title.placeholder = 'Card title';
-  title.addEventListener('input', () => { card.t = title.value.trim() || card.t; save(); refreshTickerRow(); });
-  title.addEventListener('blur', () => { if (!title.value.trim()) title.value = card.t; });
-  body.appendChild(title);
-  autoGrow(title);
-
-  /* ticker quick-link — shown when the title is a $TICKER note; jumps to the Terminal */
-  const tickerRow = el('div', 'modal-ticker');
-  body.appendChild(tickerRow);
-  function refreshTickerRow() {
-    tickerRow.textContent = '';
-    const tk = parseTicker(card.t);
-    tickerRow.hidden = !tk;
-    if (!tk) return;
-    const link = el('a', 'ticker-link modal-ticker-link');
-    link.href = tickerUrl(tk.symbol);
-    link.target = '_blank';
-    link.rel = 'noopener noreferrer';
-    const glyph = el('span', 'ticker-glyph');
-    glyph.appendChild(svgIcon(ICONS.trend, 13, 1.7));
-    link.append(glyph, el('span', 'ticker-sym', tk.symbol), el('span', 'modal-ticker-cta', 'Open in Terminal'));
-    const go = el('span', 'ticker-go');
-    go.appendChild(svgIcon('M5 3l4 5-4 5', 11, 1.8));
-    link.appendChild(go);
-    tickerRow.appendChild(link);
-  }
-  refreshTickerRow();
-
-  /* color row */
-  const colorSec = section('Color');
+function buildColorSwatches(card, board) {
+  const sec = _featSection('Color');
   const swatches = el('div', 'swatches');
-  const noneBtn = swatchBtn(null, card.color === null);
-  swatches.appendChild(noneBtn);
-  for (const cc of CARD_COLORS) swatches.appendChild(swatchBtn(cc, card.color === cc));
-  colorSec.appendChild(swatches);
-  body.appendChild(colorSec);
-
-  function swatchBtn(cc, active) {
-    const b = el('button', 'swatch' + (cc ? ' tint-' + cc : ' swatch-none') + (active ? ' active' : ''));
+  const mk = (cc) => {
+    const b = el('button', 'swatch' + (cc ? ' tint-' + cc : ' swatch-none') + (card.color === cc ? ' active' : ''));
     b.title = cc ? COLOR_NAMES[cc] : 'No color';
     b.addEventListener('click', () => {
       card.color = cc;
       save();
       $$('.swatch', swatches).forEach(s => s.classList.remove('active'));
       b.classList.add('active');
-      modal.className = 'modal' + (cc ? ' tint-' + cc : '');
+      rerenderBoard(board.id);
     });
     return b;
-  }
+  };
+  swatches.appendChild(mk(null));
+  for (const cc of CARD_COLORS) swatches.appendChild(mk(cc));
+  sec.appendChild(swatches);
+  return sec;
+}
 
-  /* due date */
-  const dueSec = section('Due date');
-  const dueRow = el('div', 'due-row');
-  const dueInput = el('input');
-  dueInput.type = 'date';
-  dueInput.className = 'due-input';
-  if (card.due) dueInput.value = card.due;
-  dueInput.addEventListener('change', () => { card.due = dueInput.value || null; save(); });
-  const dueClear = el('button', 'ghost-btn');
-  dueClear.title = 'Clear date';
-  dueClear.appendChild(svgIcon(ICONS.x, 12, 1.7));
-  dueClear.addEventListener('click', () => { dueInput.value = ''; card.due = null; save(); });
-  dueRow.append(dueInput, dueClear);
-  dueSec.appendChild(dueRow);
-  body.appendChild(dueSec);
+function buildDueControl(card, board) {
+  const sec = _featSection('Due date');
+  const row = el('div', 'due-row');
+  const input = el('input');
+  input.type = 'date';
+  input.className = 'due-input';
+  if (card.due) input.value = card.due;
+  input.addEventListener('change', () => { card.due = input.value || null; save(); rerenderBoard(board.id); });
+  const clear = el('button', 'ghost-btn');
+  clear.title = 'Clear date';
+  clear.appendChild(svgIcon(ICONS.x, 12, 1.7));
+  clear.addEventListener('click', () => { input.value = ''; card.due = null; save(); rerenderBoard(board.id); });
+  row.append(input, clear);
+  sec.appendChild(row);
+  return sec;
+}
 
-  /* tags */
-  const tagSec = section('Tags');
-  const tagWrap = el('div', 'tag-edit');
+function buildTagEditor(card, board) {
+  const sec = _featSection('Tags');
+  const wrap = el('div', 'tag-edit');
   const chipRow = el('div', 'chip-row');
-  const tagInput = el('input', 'tag-input');
-  tagInput.placeholder = 'Add a tag…';
-  tagInput.maxLength = 40;
-  const sugRow = el('div', 'tag-suggestions');
-  tagWrap.append(chipRow, tagInput, sugRow);
-  tagSec.appendChild(tagWrap);
-  body.appendChild(tagSec);
-
-  function renderTagEditor() {
+  const input = el('input', 'tag-input');
+  input.placeholder = 'Add a tag…';
+  input.maxLength = 40;
+  const sug = el('div', 'tag-suggestions');
+  wrap.append(chipRow, input, sug);
+  sec.appendChild(wrap);
+  function renderTags() {
     chipRow.textContent = '';
     for (const t of card.tags) {
       const chip = el('span', 'chip tag-chip tint-' + tagColor(t), t);
       const rm = el('button', 'chip-x');
       rm.setAttribute('aria-label', 'Remove tag ' + t);
       rm.appendChild(svgIcon(ICONS.x, 9, 2));
-      rm.addEventListener('click', () => { card.tags = card.tags.filter(x => x !== t); save(); renderTagEditor(); });
+      rm.addEventListener('click', () => { card.tags = card.tags.filter(x => x !== t); save(); renderTags(); rerenderBoard(board.id); });
       chip.appendChild(rm);
       chipRow.appendChild(chip);
     }
-    sugRow.textContent = '';
-    const q = tagInput.value.trim().toLowerCase();
+    sug.textContent = '';
+    const q = input.value.trim().toLowerCase();
     const existing = collectWsTags().filter(t => !card.tags.includes(t) && (!q || t.toLowerCase().includes(q)));
     for (const t of existing.slice(0, 6)) {
       const s = el('button', 'chip tag-chip suggestion tint-' + tagColor(t), t);
-      s.addEventListener('click', () => { addTag(t); });
-      sugRow.appendChild(s);
+      s.addEventListener('click', () => addTag(t));
+      sug.appendChild(s);
     }
   }
   function addTag(t) {
     t = t.trim().replace(/,+$/, '');
-    if (!t || card.tags.includes(t)) { tagInput.value = ''; renderTagEditor(); return; }
+    if (!t || card.tags.includes(t)) { input.value = ''; renderTags(); return; }
     card.tags.push(t);
     save();
-    tagInput.value = '';
-    renderTagEditor();
-    tagInput.focus();
+    input.value = '';
+    renderTags();
+    rerenderBoard(board.id);
+    input.focus();
   }
-  tagInput.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' || e.key === ',') { e.preventDefault(); addTag(tagInput.value); }
-    else if (e.key === 'Backspace' && !tagInput.value && card.tags.length) {
-      card.tags.pop(); save(); renderTagEditor();
-    }
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ',') { e.preventDefault(); addTag(input.value); }
+    else if (e.key === 'Backspace' && !input.value && card.tags.length) { card.tags.pop(); save(); renderTags(); rerenderBoard(board.id); }
   });
-  tagInput.addEventListener('input', renderTagEditor);
-  renderTagEditor();
+  input.addEventListener('input', renderTags);
+  renderTags();
+  return sec;
+}
 
-  /* description */
-  const descSec = section('Description');
-  const desc = el('textarea', 'modal-desc');
-  desc.rows = 3;
-  desc.placeholder = 'Add a description…';
-  desc.value = card.d || '';
-  desc.addEventListener('input', () => { card.d = desc.value; save(); });
-  descSec.appendChild(desc);
-  body.appendChild(descSec);
-  autoGrow(desc);
-
-  /* attachments */
-  const attSec = section('Attachments');
-  const attGrid = el('div', 'att-grid');
-  const attActions = el('div', 'att-actions');
+function buildAttachments(card, board) {
+  const sec = _featSection('Attachments');
+  const grid = el('div', 'att-grid');
+  const actions = el('div', 'att-actions');
   const browse = el('button', 'ghost-btn att-browse');
   browse.appendChild(svgIcon(ICONS.upload, 13, 1.6));
   browse.appendChild(el('span', null, 'Add files'));
-  const hiddenInput = el('input');
-  hiddenInput.type = 'file';
-  hiddenInput.multiple = true;
-  hiddenInput.hidden = true;
-  browse.addEventListener('click', () => hiddenInput.click());
-  hiddenInput.addEventListener('change', async () => {
-    const n = await addAttachmentsToCard(card, hiddenInput.files);
-    hiddenInput.value = '';
-    if (n) { renderAttGrid(); rerenderBoard(board.id); }
+  const hidden = el('input');
+  hidden.type = 'file';
+  hidden.multiple = true;
+  hidden.hidden = true;
+  browse.addEventListener('click', () => hidden.click());
+  hidden.addEventListener('change', async () => {
+    const n = await addAttachmentsToCard(card, hidden.files);
+    hidden.value = '';
+    if (n) { renderGrid(); rerenderBoard(board.id); }
   });
-  attActions.append(browse, el('span', 'att-hint', 'or drop files anywhere on this card'));
-  attSec.append(attGrid, attActions, hiddenInput);
-  body.appendChild(attSec);
-
-  function renderAttGrid() {
-    attGrid.textContent = '';
+  actions.append(browse, el('span', 'att-hint', 'or drop files on the note'));
+  sec.append(grid, actions, hidden);
+  function renderGrid() {
+    grid.textContent = '';
     for (const a of card.at) {
       const tile = el('div', 'att-tile');
       const open = el('button', 'att-tile-open');
@@ -212,146 +140,51 @@ function openCardModal(cardId, sourceRect) {
       const rm = el('button', 'att-tile-x');
       rm.title = 'Remove attachment';
       rm.appendChild(svgIcon(ICONS.x, 10, 2));
-      rm.addEventListener('click', () => {
-        card.at = card.at.filter(x => x.id !== a.id);
-        fileDel(a.id);
-        save();
-        renderAttGrid();
-        rerenderBoard(board.id);
-      });
+      rm.addEventListener('click', () => { card.at = card.at.filter(x => x.id !== a.id); fileDel(a.id); save(); renderGrid(); rerenderBoard(board.id); });
       tile.append(open, label, rm);
-      attGrid.appendChild(tile);
+      grid.appendChild(tile);
     }
-    attGrid.hidden = !card.at.length;
+    grid.hidden = !card.at.length;
   }
-  renderAttGrid();
-  refreshModalAttachments = (c) => { if (c.id === card.id) renderAttGrid(); };
+  renderGrid();
+  // a window-level file drop refreshes this grid only while it's the live popover
+  _refreshFeaturesAtts = (c) => { if (c.id === card.id && grid.isConnected) renderGrid(); };
+  return sec;
+}
 
-  /* footer */
-  const foot = el('div', 'modal-foot');
-  const completeBtn = el('button', 'primary-btn complete-btn');
-  const isDone = found.done;
-  completeBtn.appendChild(svgIcon(ICONS.check, 13, 2));
-  completeBtn.appendChild(el('span', null, isDone ? 'Restore' : 'Complete'));
-  completeBtn.addEventListener('click', () => {
-    closeModal();
-    if (isDone) restoreCard(card.id);
-    else completeCard(card.id);
-  });
-  const created = el('span', 'modal-stamp', 'Created ' + new Date(card.created).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }));
-  const del = el('button', 'ghost-btn danger');
-  del.appendChild(svgIcon(ICONS.trash, 13, 1.5));
-  del.appendChild(el('span', null, 'Delete'));
-  del.addEventListener('click', () => {
-    closeModal();
-    const arr = isDone ? board.done : board.cards;
-    const idx = arr.indexOf(card);
-    if (idx >= 0) arr.splice(idx, 1);
-    save();
-    rerenderBoard(board.id);
-    undoableToast('Card deleted', () => arr.splice(clamp(idx, 0, arr.length), 0, card));
-  });
-  foot.append(completeBtn, created, del);
-  modal.appendChild(foot);
-
-  function section(label) {
-    const s = el('div', 'modal-section');
-    s.appendChild(el('div', 'modal-label', label));
-    return s;
-  }
-
-  /* the modal is itself a drop zone — the window-level handler can't see through the backdrop */
-  modal.addEventListener('dragover', (e) => {
-    if (!e.dataTransfer || !Array.from(e.dataTransfer.types).includes('Files')) return;
-    e.preventDefault();
-    e.stopPropagation();
-    e.dataTransfer.dropEffect = 'copy';
-    modal.classList.add('drop-target');
-  });
-  modal.addEventListener('dragleave', (e) => {
-    if (!modal.contains(e.relatedTarget)) modal.classList.remove('drop-target');
-  });
-  modal.addEventListener('drop', async (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    modal.classList.remove('drop-target');
-    if (!e.dataTransfer.files.length) return;
-    const n = await addAttachmentsToCard(card, e.dataTransfer.files);
-    if (n) {
-      renderAttGrid();
+/* the side popover holding all note features + complete/delete.
+   Opened by hovering a note (desktop) or its ⊕ button (touch). */
+function openCardFeatures(anchor, cardId) {
+  const found = findCard(cardId);
+  if (!found) return null;
+  const { card, board } = found;
+  return openPopover(anchor, (pop, close) => {
+    pop.appendChild(buildColorSwatches(card, board));
+    pop.appendChild(buildDueControl(card, board));
+    pop.appendChild(buildTagEditor(card, board));
+    pop.appendChild(buildAttachments(card, board));
+    const foot = el('div', 'feat-foot');
+    const isDone = found.done;
+    const comp = el('button', 'primary-btn feat-complete');
+    comp.appendChild(svgIcon(ICONS.check, 13, 2));
+    comp.appendChild(el('span', null, isDone ? 'Restore' : 'Complete'));
+    comp.addEventListener('click', () => { close(); if (isDone) restoreCard(card.id); else completeCard(card.id); });
+    const del = el('button', 'ghost-btn danger feat-del');
+    del.appendChild(svgIcon(ICONS.trash, 13, 1.5));
+    del.appendChild(el('span', null, 'Delete'));
+    del.addEventListener('click', () => {
+      close();
+      forgetCardUiState(card.id);
+      const arr = isDone ? board.done : board.cards;
+      const idx = arr.indexOf(card);
+      if (idx >= 0) arr.splice(idx, 1);
+      save();
       rerenderBoard(board.id);
-      toast(n === 1 ? 'File attached' : n + ' files attached');
-    }
-  });
-
-  backdrop.appendChild(modal);
-  root.appendChild(backdrop);
-
-  // Expand from the clicked card: the modal starts scaled/translated onto the
-  // card's footprint, then springs open into the enlarged editor (FLIP).
-  if (sourceRect && sourceRect.width > 1 && !_reducedMotion()) {
-    modal.style.transition = 'none';         // measure the resting rect cleanly
-    modal.style.transform = 'none';
-    const to = modal.getBoundingClientRect();
-    modal.classList.add('expanding');
-    modal.style.transformOrigin = '0 0';
-    modal.style.transform = _flipTransform(sourceRect, to);
-    modal.style.opacity = '0.4';
-    modal.getBoundingClientRect();            // commit the start frame
-    modal.style.transition = '';             // hand off to the .expanding transition
-    requestAnimationFrame(() => {
-      backdrop.classList.add('show');
-      modal.style.transform = 'none';
-      modal.style.opacity = '1';
+      undoableToast('Card deleted', () => arr.splice(clamp(idx, 0, arr.length), 0, card));
     });
-    const cleanup = (e) => {
-      if (e && e.propertyName && e.propertyName !== 'transform') return;
-      modal.classList.remove('expanding');
-      modal.style.transformOrigin = '';
-      modal.style.transform = '';
-      modal.style.opacity = '';
-      modal.removeEventListener('transitionend', cleanup);
-    };
-    modal.addEventListener('transitionend', cleanup);
-    setTimeout(() => cleanup({ propertyName: 'transform' }), 460);
-  } else {
-    requestAnimationFrame(() => backdrop.classList.add('show'));
-  }
-
-  let closed = false;
-  function closeModal() {
-    if (closed) return;
-    closed = true;
-    refreshModalAttachments = null;
-    if (!card.t) card.t = 'Untitled';
-    save.flush();
-    rerenderBoard(board.id);                  // refresh the card node before measuring it
-    window.removeEventListener('keydown', onKey);
-    const node = $('.card[data-id="' + card.id + '"]');
-    const to = node ? node.getBoundingClientRect() : null;
-    if (to && to.width > 1 && !_reducedMotion()) {
-      // reverse the expand: collapse the editor back down into the card
-      const from = modal.getBoundingClientRect();
-      modal.classList.add('expanding');
-      modal.style.transformOrigin = '0 0';
-      modal.style.transform = 'none';
-      modal.getBoundingClientRect();          // commit
-      backdrop.classList.remove('show');
-      modal.style.transform = _flipTransform(to, from);
-      modal.style.opacity = '0';
-      setTimeout(() => backdrop.remove(), 300);
-    } else {
-      backdrop.classList.remove('show');
-      setTimeout(() => backdrop.remove(), 180);
-    }
-  }
-  backdrop.addEventListener('mousedown', (e) => { if (e.target === backdrop) closeModal(); });
-  function onKey(e) {
-    if (e.key === 'Escape' && !activePopoverClose && !$('#lightboxRoot .lightbox')) closeModal();
-  }
-  window.addEventListener('keydown', onKey);
-  title.focus();
-  title.setSelectionRange(title.value.length, title.value.length);
+    foot.append(comp, del);
+    pop.appendChild(foot);
+  }, { cls: 'card-features-pop', placement: 'right' });
 }
 
 function collectWsTags() {
@@ -375,6 +208,7 @@ function openWsSwitcher() {
       name.appendChild(el('span', 'ws-row-count', w.boards.length + (w.boards.length === 1 ? ' board' : ' boards')));
       name.addEventListener('click', () => {
         state.activeWs = w.id;
+        clearCardUiState(); // transient note-expand state doesn't carry across workspaces
         save();
         close();
         renderAll();

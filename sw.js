@@ -3,7 +3,7 @@
    any source change produces a new cache and an immediate takeover. */
 'use strict';
 
-const VERSION = 'slate-9ad3a2563c';
+const VERSION = 'slate-ce78267d0e';
 const ASSETS = [
   './',
   './index.html',

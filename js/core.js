@@ -115,7 +115,7 @@ function newCard(title) {
   return { id: uid(), t: title, d: '', color: null, tags: [], due: null, at: [], created: Date.now(), completed: null };
 }
 function newBoard(name, x, y) {
-  return { id: uid(), name: name, x: Math.round(x), y: Math.round(y), cards: [], done: [], showDone: false, desc: '', showDesc: false, collapsed: false, accent: null };
+  return { id: uid(), name: name, x: Math.round(x), y: Math.round(y), cards: [], done: [], showDone: false, collapsed: false, accent: null, showCardDescs: false, w: null, h: null };
 }
 function newWorkspace(name) {
   return { id: uid(), name: name, scroll: { x: 0, y: 0 }, boards: [] };
@@ -168,10 +168,14 @@ function migrateState(s) {
       if (!w || !Array.isArray(w.boards)) continue;
       for (const b of w.boards) {
         if (!b || typeof b !== 'object') continue;
-        if (typeof b.desc !== 'string') b.desc = '';
-        if (typeof b.showDesc !== 'boolean') b.showDesc = false;
         if (typeof b.collapsed !== 'boolean') b.collapsed = false;
         if (!CARD_COLORS.includes(b.accent)) b.accent = null;
+        // show each note's own description on the board (replaced the old
+        // board-level description feature — an early misread of the request)
+        if (typeof b.showCardDescs !== 'boolean') b.showCardDescs = !!b.showDesc;
+        // resizable boards: explicit width/height in px, or null for the default
+        if (!(typeof b.w === 'number' && b.w > 0)) b.w = null;
+        if (!(typeof b.h === 'number' && b.h > 0)) b.h = null;
       }
     }
   }

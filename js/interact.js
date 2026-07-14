@@ -132,6 +132,52 @@ function createBoardAt(x, y) {
   });
 })();
 
+/* ---------- board resize (drag right/bottom edge or corner) ---------- */
+(function boardResize() {
+  const canvas = $('#canvas');
+  const MIN_W = 220, MAX_W = 720, MIN_H = 140, MAX_H = 1400;
+  let rz = null;
+
+  canvas.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0) return;
+    const handle = e.target.closest('.board-resize');
+    if (!handle) return;
+    const node = handle.closest('.board');
+    const b = findBoard(node.dataset.id);
+    if (!b) return;
+    const r = node.getBoundingClientRect();
+    rz = { node, b, dir: handle.dataset.dir, sx: e.clientX, sy: e.clientY, w0: r.width, h0: r.height };
+    bringToFront(node);
+    node.classList.add('resizing');
+    document.body.classList.add('dragging-any');
+    e.preventDefault();
+    e.stopPropagation();
+  });
+
+  window.addEventListener('pointermove', (e) => {
+    if (!rz) return;
+    if (rz.dir === 'e' || rz.dir === 'se') {
+      rz.node.style.width = clamp(Math.round(rz.w0 + (e.clientX - rz.sx)), MIN_W, MAX_W) + 'px';
+    }
+    if (rz.dir === 's' || rz.dir === 'se') {
+      rz.node.style.maxHeight = 'none';
+      rz.node.style.height = clamp(Math.round(rz.h0 + (e.clientY - rz.sy)), MIN_H, MAX_H) + 'px';
+    }
+  });
+
+  function finishResize() {
+    if (!rz) return;
+    if (rz.dir === 'e' || rz.dir === 'se') rz.b.w = parseInt(rz.node.style.width, 10);
+    if (rz.dir === 's' || rz.dir === 'se') rz.b.h = parseInt(rz.node.style.height, 10);
+    save();
+    rz.node.classList.remove('resizing');
+    document.body.classList.remove('dragging-any');
+    rz = null;
+  }
+  window.addEventListener('pointerup', finishResize);
+  window.addEventListener('pointercancel', finishResize);
+})();
+
 /* ---------- tidy: snap boards into a grid, ordered by current position ---------- */
 function tidyBoards() {
   const ws = activeWs();
@@ -147,7 +193,9 @@ function tidyBoards() {
   const heights = new Array(cols).fill(TIDY_ORIGIN - 8);
   for (const b of sorted) {
     const node = $('.board[data-id="' + b.id + '"]');
-    const h = node ? node.offsetHeight : 200;
+    // a collapsed board renders header-only; use its stored height so tidy still
+    // reserves the space it'll take once expanded
+    const h = (b.collapsed && b.h) ? b.h : (node ? node.offsetHeight : 200);
     let col = 0;
     for (let i = 1; i < cols; i++) if (heights[i] < heights[col]) col = i;
     b.x = TIDY_ORIGIN + col * (BOARD_W + TIDY_GAP);

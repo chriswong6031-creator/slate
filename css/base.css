@@ -257,22 +257,6 @@ body.dragging-any, body.dragging-any * { cursor: grabbing !important; user-selec
 .board-collapse-btn svg { transition: transform 160ms cubic-bezier(0.2, 0.8, 0.3, 1); }
 .board-collapse-btn.is-collapsed svg { transform: rotate(-90deg); }
 
-/* per-board description shown in the board view */
-.board-desc {
-  margin: 0 14px 8px;
-  padding: 8px 11px;
-  font-size: 12.5px;
-  line-height: 1.5;
-  color: var(--ink-2);
-  background: var(--surface);
-  border: 1px solid var(--line);
-  border-radius: 9px;
-  white-space: pre-wrap;
-  word-break: break-word;
-  max-height: 150px;
-  overflow-y: auto;
-}
-
 /* collapsed board: header only */
 .board.collapsed { max-height: none; }
 .board.collapsed .board-head { padding-bottom: 11px; }
@@ -292,6 +276,29 @@ body.dragging-any, body.dragging-any * { cursor: grabbing !important; user-selec
   pointer-events: none;
 }
 .board.has-accent .board-head { padding-top: 13px; }
+
+/* ---------- board resize handles (right edge / bottom edge / corner) ---------- */
+.board-resize { position: absolute; z-index: 6; touch-action: none; }
+.board-resize-e  { top: 14px; bottom: 14px; right: -4px; width: 10px; cursor: ew-resize; }
+.board-resize-s  { left: 14px; right: 14px; bottom: -4px; height: 10px; cursor: ns-resize; }
+.board-resize-se { right: -4px; bottom: -4px; width: 18px; height: 18px; cursor: nwse-resize; z-index: 7; }
+.board-resize-e::after, .board-resize-s::after {
+  content: ""; position: absolute; background: var(--line-strong);
+  border-radius: 3px; opacity: 0; transition: opacity 130ms ease;
+}
+.board-resize-e::after { top: 50%; right: 4px; width: 3px; height: 30px; transform: translateY(-50%); }
+.board-resize-s::after { left: 50%; bottom: 4px; height: 3px; width: 30px; transform: translateX(-50%); }
+.board-resize-se::after {
+  content: ""; position: absolute; right: 4px; bottom: 4px; width: 8px; height: 8px;
+  border-right: 2px solid var(--line-strong); border-bottom: 2px solid var(--line-strong);
+  border-bottom-right-radius: 3px; opacity: 0; transition: opacity 130ms ease;
+}
+.board:hover .board-resize-e::after, .board:hover .board-resize-s::after { opacity: 0.45; }
+.board:hover .board-resize-se::after { opacity: 0.55; }
+.board-resize-e:hover::after, .board-resize-s:hover::after,
+.board.resizing .board-resize-e::after, .board.resizing .board-resize-s::after { opacity: 1; background: var(--accent); }
+.board-resize-se:hover::after, .board.resizing .board-resize-se::after { opacity: 1; border-color: var(--accent); }
+.board.resizing { user-select: none; }
 
 .cards {
   flex: 1 1 auto;

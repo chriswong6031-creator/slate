@@ -89,6 +89,8 @@ function boardEl(b) {
   root.dataset.id = b.id;
   root.style.left = b.x + 'px';
   root.style.top = b.y + 'px';
+  if (b.w) root.style.width = b.w + 'px';
+  if (b.h && !b.collapsed) { root.style.height = b.h + 'px'; root.style.maxHeight = 'none'; }
   if (b.collapsed) root.classList.add('collapsed');
   if (b.accent) root.classList.add('tint-' + b.accent, 'has-accent');
 
@@ -108,12 +110,6 @@ function boardEl(b) {
 
   // collapsed boards show only their header (title + card count)
   if (b.collapsed) return root;
-
-  // optional per-board description, shown in the board view when the board's
-  // "show description" setting is on and a description has been written
-  if (b.showDesc && b.desc && b.desc.trim()) {
-    root.appendChild(el('div', 'board-desc', b.desc.trim()));
-  }
 
   const list = el('div', 'cards');
   list.dataset.boardId = b.id;
@@ -144,11 +140,29 @@ function boardEl(b) {
       root.appendChild(doneList);
     }
   }
+
+  // resize handles: right edge (width), bottom edge (height), corner (both)
+  for (const dir of ['e', 's', 'se']) {
+    const h = el('div', 'board-resize board-resize-' + dir);
+    h.dataset.dir = dir;
+    root.appendChild(h);
+  }
   return root;
 }
 
+/* per-note ledger expand — transient (session-only), keyed by card id. A board's
+   showCardDescs forces every note open; clicking a note toggles just that one. */
+const _expandedCards = new Set();
+const _expandedDescs = new Set(); // notes whose description is showing full text ("Show less")
+const DESC_MAX = 220; // chars of description shown before "Show more"
+function isCardExpanded(c, board) { return !!(board.showCardDescs || _expandedCards.has(c.id)); }
+// drop transient per-note UI state for a note that's leaving the active board
+function forgetCardUiState(id) { _expandedCards.delete(id); _expandedDescs.delete(id); }
+function clearCardUiState() { _expandedCards.clear(); _expandedDescs.clear(); }
+
 function cardEl(c, board) {
-  const root = el('article', 'card' + (c.color ? ' tint-' + c.color : ''));
+  const expanded = isCardExpanded(c, board);
+  const root = el('article', 'card' + (c.color ? ' tint-' + c.color : '') + (expanded ? ' expanded' : ''));
   root.dataset.id = c.id;
 
   const row = el('div', 'card-row');
@@ -167,23 +181,78 @@ function cardEl(c, board) {
   tick.classList.add('tick');
   csvg.append(ring, tick);
   circle.appendChild(csvg);
+
+  const bodyWrap = el('div', 'card-body');
+  bodyWrap.appendChild(cardTitleEl(c));
+  if (expanded) bodyWrap.appendChild(cardDescEl(c));
+  const meta = cardMetaEl(c, expanded);
+  if (meta) bodyWrap.appendChild(meta);
+  const att = cardAttachmentsEl(c);
+  if (att) bodyWrap.appendChild(att);
+
+  row.append(circle, bodyWrap);
+  root.appendChild(row);
+
+  // ⊕ features button — color/due/tags/attachments (reveals on hover on desktop,
+  // tap on touch); the card also opens it on hover via the ui.js hover manager.
+  const feat = el('button', 'card-feat-btn');
+  feat.title = 'Color, due date, tags, attachments';
+  feat.setAttribute('aria-label', 'Note features');
+  feat.appendChild(svgIcon(ICONS.settings, 13, 1.6));
+  root.appendChild(feat);
+
+  return root;
+}
+
+// Display form of a note title: a $TICKER button + trailing text, or plain text.
+// Click-to-edit swaps this out for a textarea (see js/ui.js startTitleEdit).
+function cardTitleEl(c) {
   const title = el('div', 'card-title');
   const tk = parseTicker(c.t);
   if (tk) {
     title.classList.add('has-ticker');
     title.appendChild(tickerLinkEl(tk.symbol));
     if (tk.rest) title.appendChild(el('span', 'ticker-rest', tk.rest));
-  } else {
+  } else if (c.t) {
     title.textContent = c.t;
+  } else {
+    title.classList.add('empty');
+    title.textContent = 'Untitled';
   }
-  row.append(circle, title);
-  root.appendChild(row);
+  return title;
+}
 
-  const meta = cardMetaEl(c);
-  if (meta) root.appendChild(meta);
-  const att = cardAttachmentsEl(c);
-  if (att) root.appendChild(att);
-  return root;
+function truncateAtWord(s, max) {
+  if (s.length <= max) return s;
+  const cut = s.slice(0, max);
+  const sp = cut.lastIndexOf(' ');
+  return (sp > max * 0.6 ? cut.slice(0, sp) : cut).replace(/\s+$/, '');
+}
+
+// Description shown under the title when a note is expanded — clamped with a
+// "Show more" toggle; clicking the text opens an inline editor (ui.js).
+function cardDescEl(c) {
+  const wrap = el('div', 'card-desc-wrap');
+  const d = (c.d || '').trim();
+  const text = el('div', 'card-desc-text');
+  if (!d) {
+    wrap.classList.add('empty');
+    text.classList.add('placeholder');
+    text.textContent = 'Add a description…';
+    wrap.appendChild(text);
+    return wrap;
+  }
+  const long = d.length > DESC_MAX;
+  const showFull = !long || _expandedDescs.has(c.id);
+  text.textContent = showFull ? d : truncateAtWord(d, DESC_MAX) + '…';
+  wrap.appendChild(text);
+  if (long) {
+    const more = el('button', 'card-desc-more', showFull ? 'Show less' : 'Show more');
+    more.dataset.full = d;
+    more.dataset.short = truncateAtWord(d, DESC_MAX) + '…';
+    wrap.appendChild(more);
+  }
+  return wrap;
 }
 
 // A ticker symbol rendered as a button-like hyperlink into the Mastermind Terminal.
@@ -204,7 +273,7 @@ function tickerLinkEl(symbol) {
   return link;
 }
 
-function cardMetaEl(c) {
+function cardMetaEl(c, expanded) {
   const bits = [];
   if (c.due) {
     const st = dueStatus(c.due);
@@ -217,7 +286,9 @@ function cardMetaEl(c) {
     const chip = el('span', 'chip tag-chip tint-' + tagColor(t), t);
     bits.push(chip);
   }
-  if (c.d && c.d.trim()) {
+  // when collapsed, a small chip signals there's a description to expand into;
+  // when expanded the description itself is shown, so the chip is redundant
+  if (!expanded && c.d && c.d.trim()) {
     const d = el('span', 'chip desc-chip');
     d.title = 'Has a description';
     d.appendChild(svgIcon(ICONS.text, 11, 1.6));

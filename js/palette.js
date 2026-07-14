@@ -65,12 +65,14 @@ function locateCard(wsObj, card) {
     return;
   }
   if (isDone) board.showDone = true;
+  else if (typeof _expandedCards !== 'undefined') _expandedCards.add(card.id); // open its ledger inline
   save();
   renderAll();
   const vp = $('#viewport');
   vp.scrollTo({ left: Math.max(0, board.x - 120), top: Math.max(0, board.y - 90), behavior: 'smooth' });
   pulseNode($('.board[data-id="' + board.id + '"]'));
-  openCardModal(card.id);
+  const cardNode = $('.card[data-id="' + card.id + '"]');
+  if (cardNode) { cardNode.scrollIntoView({ block: 'nearest' }); pulseNode(cardNode); }
 }
 function locateTopic(cat) {
   closeAnyModal();
