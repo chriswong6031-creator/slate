@@ -1,0 +1,67 @@
+# Caddy site block for notes.mastermind-x.com  (Slate origin)
+# ---------------------------------------------------------------------------
+# THIS IS A REFERENCE COPY. The canonical home for every mastermind-x.com site
+# block is the MACRO repo: `Macro Dashboard/app/deploy/Caddyfile`, which the
+# `macro-update` cron reinstalls to /etc/caddy/Caddyfile on every macro `main`
+# commit. Paste this block THERE (not only on the box, or the cron will wipe it),
+# run `caddy validate --config /etc/caddy/Caddyfile` on the VPS, then reload.
+#
+# ⚠ Before committing to the macro repo: the repo Caddyfile currently has NO
+#   slate.greydeercapital.com block even though that site is live — i.e. the
+#   live /etc/caddy/Caddyfile has diverged from the repo. Reinstalling the repo
+#   copy could REMOVE the live slate block. Reconcile the live file with the repo
+#   FIRST (add the missing slate block to the repo too), or the cron reinstall
+#   will take slate.greydeercapital.com down.
+#
+# Serves the SAME files as slate.greydeercapital.com (/opt/slate), which the Slate
+# repo's deploy keeps fresh (rsync on push to main). Slate is fully client-side
+# (localStorage + IndexedDB, origin-scoped), so this origin holds no user data and
+# its board data is SEPARATE from the greydeercapital origin (move data with the
+# in-app gear menu -> Export/Import).
+#
+# CDN: CNAME `notes` -> TencentEdgeOne (already live: notes.mastermind-x.com ->
+# *.eo.dnse3.com), EdgeOne origin -> 146.190.142.17 with a NON-STRICT HTTPS origin
+# pull (must accept Caddy's self-signed `tls internal` cert). Force HTTPS + HSTS
+# are the EdgeOne edge's job (see the header note atop the macro Caddyfile).
+notes.mastermind-x.com {
+	root * /opt/slate
+	encode zstd gzip
+
+	file_server {
+		index index.html
+	}
+
+	# --- CDN cache safety (mirrors the mastermind-x.com block) -------------------
+	# Short, must-revalidate TTLs so a transient bad edge entry can't get stuck.
+	# sw.js is no-cache so a client can never pin a stale service worker (which
+	# would freeze the PWA on an old build).
+	@html {
+		path *.html /
+	}
+	@sw {
+		path /sw.js
+	}
+	@static {
+		path /css/* /js/* /icons/* *.webmanifest
+	}
+	header @html   Cache-Control "public, max-age=60, must-revalidate"
+	header @sw     Cache-Control "no-cache"
+	header @static Cache-Control "public, max-age=300, must-revalidate"
+
+	# file_server has no MIME mapping for .webmanifest — serve it explicitly so iOS
+	# Safari doesn't download it as text and white-page the install (same guard as
+	# the greydeercapital.com block).
+	@webmanifest path /manifest.webmanifest
+	header @webmanifest Content-Type "application/manifest+json"
+
+	header {
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		# Enforce HTTPS on return visits (the EdgeOne edge should set this too).
+		Strict-Transport-Security "max-age=31536000"
+		-Server
+	}
+
+	# Self-signed origin cert; pair with EdgeOne's NON-STRICT HTTPS origin pull.
+	tls internal
+}

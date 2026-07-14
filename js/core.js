@@ -41,6 +41,11 @@ const ICONS = {
   download: 'M8 2.5v8M4.8 7.3L8 10.5l3.2-3.2M3 13h10',
   upload: 'M8 10.5v-8M4.8 5.7L8 2.5l3.2 3.2M3 13h10',
   pencil: 'M9.8 2.8l3.4 3.4-7.6 7.6-3.9.5.5-3.9zM8.6 4l3.4 3.4',
+  settings: 'M2.5 5.5h11M2.5 10.5h11M6 4v3M10 9v3',
+  copy: 'M5.5 5.5h6.5v7h-6.5zM3.5 10.5V3.5h7',
+  move: 'M2.5 3v10M6 8h7M10 5l3 3-3 3',
+  board: 'M2.5 2.5h4.5v11H2.5zM9 2.5h4.5v7H9z',
+  trend: 'M2.5 10.5l3-3 2.5 2.5 4.5-5M10.5 5h3M13.5 5v3',
 };
 
 function debounce(fn, ms) {
@@ -84,6 +89,22 @@ function tagColor(name) { // deterministic tag color from name
   return CARD_COLORS[h % CARD_COLORS.length];
 }
 
+/* ---------- stock ticker notes ----------
+   A card title that STARTS with $TICKER (e.g. "$MCK", "$JNJ", "$BRK.B earnings")
+   renders the ticker as a button that opens the symbol in the Mastermind Terminal.
+   The ticker is 1–6 letters with an optional 1–2 letter class suffix ("$BRK.B"),
+   so ordinary "$5 lunch" / "$MCKINSEY report" titles are NOT treated as tickers. */
+const TERMINAL_URL = 'https://app.mastermind-x.com/terminal';
+function parseTicker(title) {
+  if (typeof title !== 'string') return null;
+  const m = /^\$([A-Za-z]{1,6}(?:\.[A-Za-z]{1,2})?)(?:\s+([\s\S]*))?$/.exec(title.trim());
+  if (!m) return null;
+  return { symbol: m[1].toUpperCase(), rest: (m[2] || '').trim() };
+}
+function tickerUrl(symbol) {
+  return TERMINAL_URL + '?sym=' + encodeURIComponent(symbol);
+}
+
 /* ---------- state ---------- */
 const LS_KEY = 'slate.state.v1';
 const THEME_KEY = 'slate.theme.v1'; // own key so library-page writes never get clobbered by main-app saveNow
@@ -94,7 +115,7 @@ function newCard(title) {
   return { id: uid(), t: title, d: '', color: null, tags: [], due: null, at: [], created: Date.now(), completed: null };
 }
 function newBoard(name, x, y) {
-  return { id: uid(), name: name, x: Math.round(x), y: Math.round(y), cards: [], done: [], showDone: false };
+  return { id: uid(), name: name, x: Math.round(x), y: Math.round(y), cards: [], done: [], showDone: false, desc: '', showDesc: false, collapsed: false, accent: null };
 }
 function newWorkspace(name) {
   return { id: uid(), name: name, scroll: { x: 0, y: 0 }, boards: [] };
@@ -139,6 +160,21 @@ function migrateState(s) {
   s.brain.trash = s.brain.trash.filter(
     e => e && typeof e === 'object' && e.note && typeof e.note.text === 'string'
   );
+  // board settings defaults (additive: description, per-board show-description
+  // toggle, collapse state, and an optional accent color) — normalized here so
+  // states saved before these existed still render cleanly
+  if (Array.isArray(s.ws)) {
+    for (const w of s.ws) {
+      if (!w || !Array.isArray(w.boards)) continue;
+      for (const b of w.boards) {
+        if (!b || typeof b !== 'object') continue;
+        if (typeof b.desc !== 'string') b.desc = '';
+        if (typeof b.showDesc !== 'boolean') b.showDesc = false;
+        if (typeof b.collapsed !== 'boolean') b.collapsed = false;
+        if (!CARD_COLORS.includes(b.accent)) b.accent = null;
+      }
+    }
+  }
   return s;
 }
 

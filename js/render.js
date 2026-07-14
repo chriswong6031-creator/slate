@@ -89,16 +89,31 @@ function boardEl(b) {
   root.dataset.id = b.id;
   root.style.left = b.x + 'px';
   root.style.top = b.y + 'px';
+  if (b.collapsed) root.classList.add('collapsed');
+  if (b.accent) root.classList.add('tint-' + b.accent, 'has-accent');
 
   const head = el('header', 'board-head');
   const title = el('h2', 'board-title', b.name);
   title.title = 'Double-click to rename';
   const count = el('span', 'board-count', String(b.cards.length));
+  const collapseBtn = el('button', 'ghost-btn board-collapse-btn' + (b.collapsed ? ' is-collapsed' : ''));
+  collapseBtn.title = b.collapsed ? 'Expand board' : 'Collapse board';
+  collapseBtn.setAttribute('aria-label', collapseBtn.title);
+  collapseBtn.appendChild(svgIcon('M4 6l4 4 4-4', 12, 1.9));
   const menuBtn = el('button', 'ghost-btn board-menu-btn');
   menuBtn.title = 'Board actions';
   menuBtn.appendChild(svgIcon(ICONS.dots, 15, 2.2));
-  head.append(title, count, menuBtn);
+  head.append(title, count, collapseBtn, menuBtn);
   root.appendChild(head);
+
+  // collapsed boards show only their header (title + card count)
+  if (b.collapsed) return root;
+
+  // optional per-board description, shown in the board view when the board's
+  // "show description" setting is on and a description has been written
+  if (b.showDesc && b.desc && b.desc.trim()) {
+    root.appendChild(el('div', 'board-desc', b.desc.trim()));
+  }
 
   const list = el('div', 'cards');
   list.dataset.boardId = b.id;
@@ -152,7 +167,15 @@ function cardEl(c, board) {
   tick.classList.add('tick');
   csvg.append(ring, tick);
   circle.appendChild(csvg);
-  const title = el('div', 'card-title', c.t);
+  const title = el('div', 'card-title');
+  const tk = parseTicker(c.t);
+  if (tk) {
+    title.classList.add('has-ticker');
+    title.appendChild(tickerLinkEl(tk.symbol));
+    if (tk.rest) title.appendChild(el('span', 'ticker-rest', tk.rest));
+  } else {
+    title.textContent = c.t;
+  }
   row.append(circle, title);
   root.appendChild(row);
 
@@ -161,6 +184,24 @@ function cardEl(c, board) {
   const att = cardAttachmentsEl(c);
   if (att) root.appendChild(att);
   return root;
+}
+
+// A ticker symbol rendered as a button-like hyperlink into the Mastermind Terminal.
+// It's a real anchor (middle-click / open-in-new-tab work); the canvas click
+// handler lets its native navigation through instead of opening the card editor.
+function tickerLinkEl(symbol) {
+  const link = el('a', 'ticker-link');
+  link.href = tickerUrl(symbol);
+  link.target = '_blank';
+  link.rel = 'noopener noreferrer';
+  link.title = symbol + ' — open in Mastermind Terminal';
+  const glyph = el('span', 'ticker-glyph');
+  glyph.appendChild(svgIcon(ICONS.trend, 12, 1.7));
+  link.append(glyph, el('span', 'ticker-sym', symbol));
+  const arrow = el('span', 'ticker-go');
+  arrow.appendChild(svgIcon('M5 3l4 5-4 5', 10, 1.8));
+  link.appendChild(arrow);
+  return link;
 }
 
 function cardMetaEl(c) {

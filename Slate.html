@@ -265,6 +265,46 @@ body.dragging-any, body.dragging-any * { cursor: grabbing !important; user-selec
 }
 .board-menu-btn { color: var(--ink-3); border-radius: 6px; padding: 4px; }
 .board-menu-btn:hover { background: var(--hover); color: var(--ink); }
+.board-collapse-btn { color: var(--ink-3); border-radius: 6px; padding: 4px; }
+.board-collapse-btn:hover { background: var(--hover); color: var(--ink); }
+.board-collapse-btn svg { transition: transform 160ms cubic-bezier(0.2, 0.8, 0.3, 1); }
+.board-collapse-btn.is-collapsed svg { transform: rotate(-90deg); }
+
+/* per-board description shown in the board view */
+.board-desc {
+  margin: 0 14px 8px;
+  padding: 8px 11px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--ink-2);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 150px;
+  overflow-y: auto;
+}
+
+/* collapsed board: header only */
+.board.collapsed { max-height: none; }
+.board.collapsed .board-head { padding-bottom: 11px; }
+
+/* optional accent color: a thin stripe across the board's top edge.
+   inset by -1px so it sits flush over the 1px border, and the outer 14px
+   radius so its corners line up with the board's rounded corners */
+.board.has-accent::before {
+  content: "";
+  position: absolute;
+  top: -1px;
+  left: -1px;
+  right: -1px;
+  height: 4px;
+  background: var(--t-bar);
+  border-radius: 14px 14px 0 0;
+  pointer-events: none;
+}
+.board.has-accent .board-head { padding-top: 13px; }
 
 .cards {
   flex: 1 1 auto;
@@ -374,6 +414,69 @@ body.dragging-any, body.dragging-any * { cursor: grabbing !important; user-selec
   gap: 5px;
   margin: 8px 0 1px 27px;
 }
+
+/* ---------- ticker note ($MCK) ---------- */
+.card-title.has-ticker {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding-top: 0;
+}
+.ticker-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 7px 3px 6px;
+  border-radius: 8px;
+  font-family: var(--mono);
+  font-weight: 700;
+  font-size: 12px;
+  letter-spacing: 0.02em;
+  line-height: 1.15;
+  color: #fff;
+  text-decoration: none;
+  cursor: pointer;
+  border: 1px solid color-mix(in srgb, var(--accent) 62%, #000);
+  background: linear-gradient(135deg, color-mix(in srgb, var(--accent) 84%, #fff), color-mix(in srgb, var(--accent) 88%, #000));
+  box-shadow: 0 1px 2px rgba(20, 30, 50, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.28);
+  transition: transform 130ms cubic-bezier(0.2, 0.8, 0.3, 1), box-shadow 130ms ease, filter 130ms ease;
+  user-select: none;
+}
+.ticker-link:hover {
+  transform: translateY(-1px);
+  filter: brightness(1.07) saturate(1.05);
+  box-shadow: 0 5px 14px -3px color-mix(in srgb, var(--accent) 55%, transparent), inset 0 1px 0 rgba(255, 255, 255, 0.34);
+}
+.ticker-link:active { transform: translateY(0); filter: brightness(0.98); }
+.ticker-glyph { display: inline-flex; color: rgba(255, 255, 255, 0.92); }
+.ticker-glyph svg, .ticker-go svg { display: block; }
+.ticker-sym { color: #fff; }
+.ticker-go {
+  display: inline-flex;
+  color: rgba(255, 255, 255, 0.85);
+  max-width: 0;
+  opacity: 0;
+  overflow: hidden;
+  margin-left: -5px;
+  transition: max-width 150ms ease, opacity 130ms ease, margin 150ms ease;
+}
+.ticker-link:hover .ticker-go { max-width: 14px; opacity: 1; margin-left: -1px; }
+.ticker-rest {
+  color: var(--ink);
+  font-weight: 500;
+  font-size: 13.5px;
+  line-height: 1.42;
+  overflow-wrap: break-word;
+  min-width: 0;
+}
+
+/* ticker quick-link inside the enlarged editor */
+.modal-ticker { display: flex; margin-top: -4px; }
+.modal-ticker[hidden] { display: none; }
+.modal-ticker-link { font-size: 13px; padding: 6px 11px 6px 9px; border-radius: 10px; gap: 7px; }
+.modal-ticker-cta { font-family: var(--font); font-weight: 600; letter-spacing: 0; color: rgba(255, 255, 255, 0.96); }
+.modal-ticker-link .ticker-go { max-width: 14px; opacity: 0.9; margin-left: 0; }
 
 /* complete circle */
 .complete-circle {
@@ -625,6 +728,8 @@ body.dragging-any, body.dragging-any * { cursor: grabbing !important; user-selec
   flex-direction: column;
 }
 .modal-backdrop.show .modal { transform: none; }
+/* card→editor expand/collapse (FLIP): overrides the default entry transition */
+.modal.expanding { transition: transform 300ms cubic-bezier(0.32, 0.72, 0, 1), opacity 220ms ease; will-change: transform, opacity; }
 .modal.drop-target { box-shadow: 0 0 0 2.5px var(--accent), var(--shadow-pop); }
 /* close button — top-right of modal */
 .modal-close-btn {
@@ -845,6 +950,63 @@ body.dragging-any, body.dragging-any * { cursor: grabbing !important; user-selec
 .pop-item.danger:hover { background: rgba(209, 77, 77, 0.08); }
 .pop-divider { height: 1px; background: var(--line); margin: 5px 6px; }
 .pop-note { padding: 7px 10px 8px; font-size: 11.5px; line-height: 1.45; color: var(--ink-3); max-width: 230px; }
+.pop-heading {
+  padding: 6px 10px 5px;
+  font-size: 10.5px;
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+.pop-item-count { margin-left: auto; padding-left: 10px; font-family: var(--mono); font-size: 10px; color: var(--ink-3); font-weight: 400; }
+
+/* ---------- board settings modal ---------- */
+.board-settings { width: 440px; }
+.board-set-name {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: transparent;
+  padding: 9px 12px;
+  font-size: 14.5px;
+  font-weight: 600;
+  color: var(--ink);
+}
+.board-set-name:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.board-set-toggle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 2px;
+}
+.board-set-toggle-label { flex: 1; font-size: 13px; color: var(--ink-2); }
+.switch {
+  flex-shrink: 0;
+  width: 38px;
+  height: 22px;
+  border-radius: 99px;
+  background: var(--line-strong);
+  border: none;
+  padding: 0;
+  position: relative;
+  cursor: pointer;
+  transition: background 150ms ease;
+}
+.switch.on { background: var(--accent); }
+.switch-knob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+  transition: transform 150ms cubic-bezier(0.2, 0.8, 0.3, 1);
+}
+.switch.on .switch-knob { transform: translateX(16px); }
+.board-set-foot { flex-wrap: wrap; }
+.board-set-foot-spacer { flex: 1; }
 
 /* workspace switcher popover */
 .ws-pop { min-width: 250px; }
@@ -2233,6 +2395,11 @@ const ICONS = {
   download: 'M8 2.5v8M4.8 7.3L8 10.5l3.2-3.2M3 13h10',
   upload: 'M8 10.5v-8M4.8 5.7L8 2.5l3.2 3.2M3 13h10',
   pencil: 'M9.8 2.8l3.4 3.4-7.6 7.6-3.9.5.5-3.9zM8.6 4l3.4 3.4',
+  settings: 'M2.5 5.5h11M2.5 10.5h11M6 4v3M10 9v3',
+  copy: 'M5.5 5.5h6.5v7h-6.5zM3.5 10.5V3.5h7',
+  move: 'M2.5 3v10M6 8h7M10 5l3 3-3 3',
+  board: 'M2.5 2.5h4.5v11H2.5zM9 2.5h4.5v7H9z',
+  trend: 'M2.5 10.5l3-3 2.5 2.5 4.5-5M10.5 5h3M13.5 5v3',
 };
 
 function debounce(fn, ms) {
@@ -2276,6 +2443,22 @@ function tagColor(name) { // deterministic tag color from name
   return CARD_COLORS[h % CARD_COLORS.length];
 }
 
+/* ---------- stock ticker notes ----------
+   A card title that STARTS with $TICKER (e.g. "$MCK", "$JNJ", "$BRK.B earnings")
+   renders the ticker as a button that opens the symbol in the Mastermind Terminal.
+   The ticker is 1–6 letters with an optional 1–2 letter class suffix ("$BRK.B"),
+   so ordinary "$5 lunch" / "$MCKINSEY report" titles are NOT treated as tickers. */
+const TERMINAL_URL = 'https://app.mastermind-x.com/terminal';
+function parseTicker(title) {
+  if (typeof title !== 'string') return null;
+  const m = /^\$([A-Za-z]{1,6}(?:\.[A-Za-z]{1,2})?)(?:\s+([\s\S]*))?$/.exec(title.trim());
+  if (!m) return null;
+  return { symbol: m[1].toUpperCase(), rest: (m[2] || '').trim() };
+}
+function tickerUrl(symbol) {
+  return TERMINAL_URL + '?sym=' + encodeURIComponent(symbol);
+}
+
 /* ---------- state ---------- */
 const LS_KEY = 'slate.state.v1';
 const THEME_KEY = 'slate.theme.v1'; // own key so library-page writes never get clobbered by main-app saveNow
@@ -2286,7 +2469,7 @@ function newCard(title) {
   return { id: uid(), t: title, d: '', color: null, tags: [], due: null, at: [], created: Date.now(), completed: null };
 }
 function newBoard(name, x, y) {
-  return { id: uid(), name: name, x: Math.round(x), y: Math.round(y), cards: [], done: [], showDone: false };
+  return { id: uid(), name: name, x: Math.round(x), y: Math.round(y), cards: [], done: [], showDone: false, desc: '', showDesc: false, collapsed: false, accent: null };
 }
 function newWorkspace(name) {
   return { id: uid(), name: name, scroll: { x: 0, y: 0 }, boards: [] };
@@ -2331,6 +2514,21 @@ function migrateState(s) {
   s.brain.trash = s.brain.trash.filter(
     e => e && typeof e === 'object' && e.note && typeof e.note.text === 'string'
   );
+  // board settings defaults (additive: description, per-board show-description
+  // toggle, collapse state, and an optional accent color) — normalized here so
+  // states saved before these existed still render cleanly
+  if (Array.isArray(s.ws)) {
+    for (const w of s.ws) {
+      if (!w || !Array.isArray(w.boards)) continue;
+      for (const b of w.boards) {
+        if (!b || typeof b !== 'object') continue;
+        if (typeof b.desc !== 'string') b.desc = '';
+        if (typeof b.showDesc !== 'boolean') b.showDesc = false;
+        if (typeof b.collapsed !== 'boolean') b.collapsed = false;
+        if (!CARD_COLORS.includes(b.accent)) b.accent = null;
+      }
+    }
+  }
   return s;
 }
 
@@ -2708,16 +2906,31 @@ function boardEl(b) {
   root.dataset.id = b.id;
   root.style.left = b.x + 'px';
   root.style.top = b.y + 'px';
+  if (b.collapsed) root.classList.add('collapsed');
+  if (b.accent) root.classList.add('tint-' + b.accent, 'has-accent');
 
   const head = el('header', 'board-head');
   const title = el('h2', 'board-title', b.name);
   title.title = 'Double-click to rename';
   const count = el('span', 'board-count', String(b.cards.length));
+  const collapseBtn = el('button', 'ghost-btn board-collapse-btn' + (b.collapsed ? ' is-collapsed' : ''));
+  collapseBtn.title = b.collapsed ? 'Expand board' : 'Collapse board';
+  collapseBtn.setAttribute('aria-label', collapseBtn.title);
+  collapseBtn.appendChild(svgIcon('M4 6l4 4 4-4', 12, 1.9));
   const menuBtn = el('button', 'ghost-btn board-menu-btn');
   menuBtn.title = 'Board actions';
   menuBtn.appendChild(svgIcon(ICONS.dots, 15, 2.2));
-  head.append(title, count, menuBtn);
+  head.append(title, count, collapseBtn, menuBtn);
   root.appendChild(head);
+
+  // collapsed boards show only their header (title + card count)
+  if (b.collapsed) return root;
+
+  // optional per-board description, shown in the board view when the board's
+  // "show description" setting is on and a description has been written
+  if (b.showDesc && b.desc && b.desc.trim()) {
+    root.appendChild(el('div', 'board-desc', b.desc.trim()));
+  }
 
   const list = el('div', 'cards');
   list.dataset.boardId = b.id;
@@ -2771,7 +2984,15 @@ function cardEl(c, board) {
   tick.classList.add('tick');
   csvg.append(ring, tick);
   circle.appendChild(csvg);
-  const title = el('div', 'card-title', c.t);
+  const title = el('div', 'card-title');
+  const tk = parseTicker(c.t);
+  if (tk) {
+    title.classList.add('has-ticker');
+    title.appendChild(tickerLinkEl(tk.symbol));
+    if (tk.rest) title.appendChild(el('span', 'ticker-rest', tk.rest));
+  } else {
+    title.textContent = c.t;
+  }
   row.append(circle, title);
   root.appendChild(row);
 
@@ -2780,6 +3001,24 @@ function cardEl(c, board) {
   const att = cardAttachmentsEl(c);
   if (att) root.appendChild(att);
   return root;
+}
+
+// A ticker symbol rendered as a button-like hyperlink into the Mastermind Terminal.
+// It's a real anchor (middle-click / open-in-new-tab work); the canvas click
+// handler lets its native navigation through instead of opening the card editor.
+function tickerLinkEl(symbol) {
+  const link = el('a', 'ticker-link');
+  link.href = tickerUrl(symbol);
+  link.target = '_blank';
+  link.rel = 'noopener noreferrer';
+  link.title = symbol + ' — open in Mastermind Terminal';
+  const glyph = el('span', 'ticker-glyph');
+  glyph.appendChild(svgIcon(ICONS.trend, 12, 1.7));
+  link.append(glyph, el('span', 'ticker-sym', symbol));
+  const arrow = el('span', 'ticker-go');
+  arrow.appendChild(svgIcon('M5 3l4 5-4 5', 10, 1.8));
+  link.appendChild(arrow);
+  return link;
 }
 
 function cardMetaEl(c) {
@@ -3302,7 +3541,11 @@ function openPopover(anchor, build, opts) {
   pop.style.top = Math.min(r.bottom + 6, window.innerHeight - pop.offsetHeight - 12) + 'px';
   pop.style.left = clamp(r.left, 8, window.innerWidth - pop.offsetWidth - 8) + 'px';
   requestAnimationFrame(() => pop.classList.add('show'));
-  function onOutside(e) { if (!pop.contains(e.target) && e.target !== anchor && !anchor.contains(e.target)) close(); }
+  // stopPropagation so a dismiss-click on a popover layered over a modal doesn't
+  // also reach the modal backdrop's mousedown handler and close the modal too
+  // (mirrors the Escape path in onKey). Only pointer-based (pointerdown) canvas
+  // and drag handlers exist elsewhere, so stopping mousedown here is safe.
+  function onOutside(e) { if (!pop.contains(e.target) && e.target !== anchor && !anchor.contains(e.target)) { e.stopPropagation(); close(); } }
   function onKey(e) { if (e.key === 'Escape') { e.stopPropagation(); close(); } }
   window.addEventListener('mousedown', onOutside, true);
   window.addEventListener('keydown', onKey, true);
@@ -3481,13 +3724,138 @@ function startBoardRename(boardNode, board, isNew) {
   });
 }
 
-/* ---------- board menu ---------- */
+/* ---------- board actions (shared by the 3-dot menu, right-click menu, settings) ---------- */
+
+// A synthetic popover anchor at an arbitrary screen point, so a right-click can
+// open the same menu the 3-dot button does. `contains` never matches, so the
+// popover's outside-click handler behaves normally.
+function pointAnchor(x, y) {
+  return {
+    getBoundingClientRect: () => ({ left: x, right: x, top: y, bottom: y, width: 0, height: 0, x, y }),
+    contains: () => false,
+  };
+}
+
+function deleteBoard(board) {
+  const ws = activeWs();
+  const idx = ws.boards.indexOf(board);
+  if (idx < 0) return;
+  ws.boards.splice(idx, 1);
+  save();
+  rerenderBoard(board.id);
+  $('#hint').hidden = ws.boards.length > 0;
+  undoableToast('Board deleted', () => ws.boards.splice(clamp(idx, 0, ws.boards.length), 0, board));
+}
+
+function toggleBoardCollapsed(board) {
+  board.collapsed = !board.collapsed;
+  save();
+  rerenderBoard(board.id);
+}
+
+function duplicateBoard(board) {
+  const ws = activeWs();
+  const copy = JSON.parse(JSON.stringify(board));
+  copy.id = uid();
+  copy.name = (board.name ? board.name + ' copy' : 'Untitled copy');
+  copy.collapsed = false;
+  copy.x = clamp(board.x + 28, 0, CANVAS_W - BOARD_W);
+  copy.y = clamp(board.y + 28, 0, CANVAS_H - 100);
+  // fresh card ids so the two boards never collide; attachment blobs are shared
+  // by reference (the GC keeps a blob while any card still points at it)
+  for (const c of copy.cards) c.id = uid();
+  for (const c of copy.done) c.id = uid();
+  const idx = ws.boards.indexOf(board);
+  ws.boards.splice(idx + 1, 0, copy);
+  save();
+  const node = boardEl(copy);
+  node.classList.add('board-enter');
+  $('#canvas').appendChild(node);
+  bringToFront(node);
+  $('#hint').hidden = true;
+  toast('Board duplicated', {
+    action: { label: 'Undo', fn: () => {
+      const j = ws.boards.indexOf(copy);
+      if (j >= 0) ws.boards.splice(j, 1);
+      save();
+      rerenderBoard(copy.id);
+    } },
+  });
+}
+
+function moveBoardToWorkspace(board, targetWs) {
+  const from = activeWs();
+  if (!targetWs || targetWs.id === from.id) return;
+  const idx = from.boards.indexOf(board);
+  if (idx < 0) return;
+  from.boards.splice(idx, 1);
+  targetWs.boards.push(board);
+  save();
+  rerenderBoard(board.id); // drops it from the current canvas
+  $('#hint').hidden = from.boards.length > 0;
+  undoableToast('Board moved to "' + targetWs.name + '"', () => {
+    const j = targetWs.boards.indexOf(board);
+    if (j >= 0) targetWs.boards.splice(j, 1);
+    from.boards.splice(clamp(idx, 0, from.boards.length), 0, board);
+  });
+}
+
+// Second-level menu listing every other workspace (plus "New workspace…").
+// afterMove (optional) runs once a move is committed — the settings modal uses
+// it to close itself, since the board it was editing has left this workspace.
+function openMoveToWorkspaceMenu(anchor, board, afterMove) {
+  openPopover(anchor, (pop, close) => {
+    pop.classList.add('ws-pop');
+    pop.appendChild(el('div', 'pop-heading', 'Move to workspace'));
+    const others = state.ws.filter(w => w.id !== state.activeWs);
+    for (const w of others) {
+      const item = popItem(w.name, ICONS.board || null, () => {
+        close();
+        moveBoardToWorkspace(board, w);
+        if (afterMove) afterMove();
+      });
+      item.appendChild(el('span', 'pop-item-count', w.boards.length + (w.boards.length === 1 ? ' board' : ' boards')));
+      pop.appendChild(item);
+    }
+    if (others.length) pop.appendChild(el('div', 'pop-divider'));
+    pop.appendChild(popItem('New workspace…', ICONS.plus, () => {
+      close();
+      const w = newWorkspace(board.name ? board.name + ' space' : 'New space');
+      state.ws.push(w);
+      moveBoardToWorkspace(board, w);
+      if (afterMove) afterMove();
+    }));
+  });
+}
+
+/* ---------- board menu (3-dot button + right-click) ---------- */
 function openBoardMenu(anchor, board) {
   openPopover(anchor, (pop, close) => {
+    pop.appendChild(popItem('Board settings…', ICONS.settings, () => {
+      close();
+      openBoardSettings(board);
+    }));
     pop.appendChild(popItem('Rename board', ICONS.pencil, () => {
       close();
       const node = $('.board[data-id="' + board.id + '"]');
-      startBoardRename(node, board, false);
+      if (node) startBoardRename(node, board, false);
+    }));
+    pop.appendChild(popItem((board.desc && board.desc.trim())
+      ? (board.showDesc ? 'Hide description' : 'Show description')
+      : 'Add description…', ICONS.text, () => {
+      close();
+      if (board.desc && board.desc.trim()) {
+        board.showDesc = !board.showDesc;
+        save();
+        rerenderBoard(board.id);
+      } else {
+        openBoardSettings(board, { focus: 'desc' });
+      }
+    }));
+    pop.appendChild(popItem(board.collapsed ? 'Expand board' : 'Collapse board',
+      board.collapsed ? 'M4 6l4 4 4-4' : 'M4 10l4-4 4 4', () => {
+      close();
+      toggleBoardCollapsed(board);
     }));
     if (board.done.length) {
       pop.appendChild(popItem(board.showDone ? 'Hide completed' : 'Show completed (' + board.done.length + ')', ICONS.check, () => {
@@ -3497,17 +3865,168 @@ function openBoardMenu(anchor, board) {
         rerenderBoard(board.id);
       }));
     }
+    pop.appendChild(popItem('Duplicate board', ICONS.copy, () => {
+      close();
+      duplicateBoard(board);
+    }));
+    pop.appendChild(popItem('Move to workspace…', ICONS.move, () => {
+      close();
+      openMoveToWorkspaceMenu(anchor, board);
+    }));
+    pop.appendChild(el('div', 'pop-divider'));
     pop.appendChild(popItem('Delete board', ICONS.trash, () => {
       close();
-      const ws = activeWs();
-      const idx = ws.boards.indexOf(board);
-      ws.boards.splice(idx, 1);
-      save();
-      rerenderBoard(board.id);
-      $('#hint').hidden = ws.boards.length > 0;
-      undoableToast('Board deleted', () => ws.boards.splice(clamp(idx, 0, ws.boards.length), 0, board));
+      deleteBoard(board);
     }, 'danger'));
   });
+}
+
+/* ---------- board settings modal ---------- */
+function openBoardSettings(board, opts) {
+  opts = opts || {};
+  const root = $('#modalRoot');
+  root.textContent = '';
+
+  const backdrop = el('div', 'modal-backdrop');
+  const modal = el('div', 'modal board-settings' + (board.accent ? ' tint-' + board.accent : ''));
+  modal.dataset.boardId = board.id;
+  modal.appendChild(el('div', 'modal-accent'));
+
+  const closeBtnEl = el('button', 'modal-close-btn');
+  closeBtnEl.title = 'Close';
+  closeBtnEl.setAttribute('aria-label', 'Close');
+  closeBtnEl.appendChild(svgIcon(ICONS.x, 13, 2));
+  closeBtnEl.addEventListener('click', () => closeModal());
+  modal.appendChild(closeBtnEl);
+
+  const body = el('div', 'modal-body');
+  modal.appendChild(body);
+
+  function section(label) {
+    const s = el('div', 'modal-section');
+    s.appendChild(el('div', 'modal-label', label));
+    return s;
+  }
+
+  /* name */
+  const nameSec = section('Board name');
+  const nameInput = el('input', 'board-set-name');
+  nameInput.value = board.name || '';
+  nameInput.placeholder = 'Name this board';
+  nameInput.maxLength = 80;
+  nameInput.addEventListener('input', () => {
+    board.name = nameInput.value.trim() || board.name;
+    save();
+    rerenderBoard(board.id);
+  });
+  nameSec.appendChild(nameInput);
+  body.appendChild(nameSec);
+
+  /* description + show-on-board toggle */
+  const descSec = section('Description');
+  const desc = el('textarea', 'modal-desc');
+  desc.rows = 3;
+  desc.placeholder = 'Add a description for this board…';
+  desc.value = board.desc || '';
+  desc.addEventListener('input', () => {
+    board.desc = desc.value;
+    save();
+    if (board.showDesc) rerenderBoard(board.id);
+  });
+  descSec.appendChild(desc);
+  autoGrow(desc);
+  const showToggle = toggleRow('Show description on the board', board.showDesc, (on) => {
+    board.showDesc = on;
+    save();
+    rerenderBoard(board.id);
+  });
+  descSec.appendChild(showToggle);
+  body.appendChild(descSec);
+
+  /* accent color */
+  const colorSec = section('Accent color');
+  const swatches = el('div', 'swatches');
+  const noneBtn = accentSwatch(null, board.accent === null);
+  swatches.appendChild(noneBtn);
+  for (const cc of CARD_COLORS) swatches.appendChild(accentSwatch(cc, board.accent === cc));
+  colorSec.appendChild(swatches);
+  body.appendChild(colorSec);
+
+  function accentSwatch(cc, active) {
+    const b = el('button', 'swatch' + (cc ? ' tint-' + cc : ' swatch-none') + (active ? ' active' : ''));
+    b.title = cc ? COLOR_NAMES[cc] : 'No accent';
+    b.addEventListener('click', () => {
+      board.accent = cc;
+      save();
+      $$('.swatch', swatches).forEach(s => s.classList.remove('active'));
+      b.classList.add('active');
+      modal.className = 'modal board-settings' + (cc ? ' tint-' + cc : '');
+      rerenderBoard(board.id);
+    });
+    return b;
+  }
+
+  /* footer: move / duplicate / delete */
+  const foot = el('div', 'modal-foot board-set-foot');
+  const moveBtn = el('button', 'ghost-btn');
+  moveBtn.appendChild(svgIcon(ICONS.move, 13, 1.6));
+  moveBtn.appendChild(el('span', null, 'Move'));
+  moveBtn.addEventListener('click', () => openMoveToWorkspaceMenu(moveBtn, board, () => closeModal()));
+  const dupBtn = el('button', 'ghost-btn');
+  dupBtn.appendChild(svgIcon(ICONS.copy, 13, 1.6));
+  dupBtn.appendChild(el('span', null, 'Duplicate'));
+  dupBtn.addEventListener('click', () => { closeModal(); duplicateBoard(board); });
+  const spacer = el('span', 'board-set-foot-spacer');
+  const del = el('button', 'ghost-btn danger');
+  del.appendChild(svgIcon(ICONS.trash, 13, 1.5));
+  del.appendChild(el('span', null, 'Delete'));
+  del.addEventListener('click', () => { closeModal(); deleteBoard(board); });
+  foot.append(moveBtn, dupBtn, spacer, del);
+  modal.appendChild(foot);
+
+  backdrop.appendChild(modal);
+  root.appendChild(backdrop);
+  requestAnimationFrame(() => backdrop.classList.add('show'));
+
+  let closed = false;
+  function closeModal() {
+    if (closed) return;
+    closed = true;
+    backdrop.classList.remove('show');
+    setTimeout(() => backdrop.remove(), 180);
+    window.removeEventListener('keydown', onKey);
+    // every edit (name/desc/accent/toggle) already rerenders the board live, so
+    // the canvas node is current — just persist; no extra rerender needed
+    save.flush();
+  }
+  backdrop.addEventListener('mousedown', (e) => { if (e.target === backdrop) closeModal(); });
+  function onKey(e) {
+    if (e.key === 'Escape' && !activePopoverClose) closeModal();
+  }
+  window.addEventListener('keydown', onKey);
+
+  if (opts.focus === 'desc') { desc.focus(); }
+  else { nameInput.focus(); nameInput.setSelectionRange(nameInput.value.length, nameInput.value.length); }
+}
+
+// A labeled on/off switch used in the board settings modal.
+function toggleRow(labelText, initial, onChange) {
+  const row = el('div', 'board-set-toggle');
+  row.appendChild(el('span', 'board-set-toggle-label', labelText));
+  let on = !!initial;
+  const sw = el('button', 'switch' + (on ? ' on' : ''));
+  sw.type = 'button';
+  sw.setAttribute('role', 'switch');
+  sw.setAttribute('aria-checked', String(on));
+  sw.appendChild(el('span', 'switch-knob'));
+  sw.addEventListener('click', () => {
+    on = !on;
+    sw.classList.toggle('on', on);
+    sw.setAttribute('aria-checked', String(on));
+    onChange(on);
+  });
+  row.appendChild(sw);
+  return row;
 }
 
 /* ---------- file drag-in (attachments) ---------- */
@@ -3555,6 +4074,10 @@ function openBoardMenu(anchor, board) {
     const board = findBoard(boardNode.dataset.id);
     if (!board) return;
 
+    // ticker button is a real hyperlink into the Terminal — let it navigate,
+    // don't hijack the click to open the card editor
+    if (e.target.closest('.ticker-link')) return;
+
     const circle = e.target.closest('.complete-circle');
     if (circle) {
       const cardNode = circle.closest('.card');
@@ -3570,6 +4093,7 @@ function openBoardMenu(anchor, board) {
       return;
     }
     if (e.target.closest('.add-card-btn')) { openComposer(boardNode, board); return; }
+    if (e.target.closest('.board-collapse-btn')) { toggleBoardCollapsed(board); return; }
     if (e.target.closest('.board-menu-btn')) { openBoardMenu(e.target.closest('.board-menu-btn'), board); return; }
     const doneBar = e.target.closest('.done-bar');
     if (doneBar) {
@@ -3589,11 +4113,11 @@ function openBoardMenu(anchor, board) {
     }
     const cardNode = e.target.closest('.card');
     if (cardNode && !cardNode.classList.contains('done-card') && !e.target.closest('button')) {
-      openCardModal(cardNode.dataset.id);
+      openCardModal(cardNode.dataset.id, cardNode.getBoundingClientRect());
       return;
     }
     if (cardNode && cardNode.classList.contains('done-card') && !e.target.closest('button')) {
-      openCardModal(cardNode.dataset.id);
+      openCardModal(cardNode.dataset.id, cardNode.getBoundingClientRect());
     }
   });
 
@@ -3604,7 +4128,45 @@ function openBoardMenu(anchor, board) {
       startBoardRename(boardNode, findBoard(boardNode.dataset.id), false);
     }
   });
+
+  // Native right-click → context menu. On a board it opens the full board menu;
+  // on empty canvas it offers board-creation shortcuts. Editable fields keep
+  // their native menu so copy/paste still works while renaming or writing a card.
+  $('#canvas').addEventListener('contextmenu', (e) => {
+    if (state.view === 'brain') return;
+    if (e.target.closest('input, textarea, [contenteditable]')) return;
+    const boardNode = e.target.closest('.board');
+    if (boardNode) {
+      const board = findBoard(boardNode.dataset.id);
+      if (!board) return;
+      e.preventDefault();
+      bringToFront(boardNode);
+      openBoardMenu(pointAnchor(e.clientX, e.clientY), board);
+      return;
+    }
+    const canvas = $('#canvas');
+    if (e.target === canvas) {
+      e.preventDefault();
+      openCanvasMenu(e.clientX, e.clientY);
+    }
+  });
 })();
+
+/* ---------- empty-canvas context menu ---------- */
+function openCanvasMenu(clientX, clientY) {
+  openPopover(pointAnchor(clientX, clientY), (pop, close) => {
+    pop.appendChild(popItem('New board here', ICONS.plus, () => {
+      close();
+      const r = $('#canvas').getBoundingClientRect();
+      const x = clamp(clientX - r.left - BOARD_W / 2, 8, CANVAS_W - BOARD_W - 8);
+      const y = clamp(clientY - r.top - 20, 8, CANVAS_H - 100);
+      createBoardAt(x, y);
+    }));
+    if (activeWs().boards.length > 1) {
+      pop.appendChild(popItem('Tidy boards', ICONS.board, () => { close(); tidyBoards(); }));
+    }
+  });
+}
 
 </script>
 <script>
@@ -5539,7 +6101,7 @@ function paletteIndex() {
       renderAll();
     } });
     for (const b of w.boards) {
-      out.push({ type: 'board', label: b.name, hint: w.name, run: () => locateBoard(w, b) });
+      out.push({ type: 'board', label: b.name, hay: b.name + ' ' + (b.desc || ''), hint: w.name, run: () => locateBoard(w, b) });
       // FG-17: "Add card to <board>" quick-entry
       out.push({ type: 'addcard', label: 'Add card to ' + b.name, hint: w.name, run: () => {
         closeAnyModal();
@@ -5898,7 +6460,17 @@ return { openDB, exportAll, importAll };
 /* ---------- card modal ---------- */
 let refreshModalAttachments = null;
 
-function openCardModal(cardId) {
+// Transform that maps `toRect` (a resting element) onto `fromRect` (its origin),
+// with transform-origin at 0 0 — the heart of the card→editor expand animation.
+function _flipTransform(fromRect, toRect) {
+  const scale = Math.max(0.08, Math.min(1, fromRect.width / toRect.width));
+  return 'translate(' + (fromRect.left - toRect.left) + 'px,' + (fromRect.top - toRect.top) + 'px) scale(' + scale + ')';
+}
+function _reducedMotion() {
+  return window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+}
+
+function openCardModal(cardId, sourceRect) {
   const found = findCard(cardId);
   if (!found) return;
   const { card, board } = found;
@@ -5927,10 +6499,32 @@ function openCardModal(cardId) {
   title.rows = 1;
   title.value = card.t;
   title.placeholder = 'Card title';
-  title.addEventListener('input', () => { card.t = title.value.trim() || card.t; save(); });
+  title.addEventListener('input', () => { card.t = title.value.trim() || card.t; save(); refreshTickerRow(); });
   title.addEventListener('blur', () => { if (!title.value.trim()) title.value = card.t; });
   body.appendChild(title);
   autoGrow(title);
+
+  /* ticker quick-link — shown when the title is a $TICKER note; jumps to the Terminal */
+  const tickerRow = el('div', 'modal-ticker');
+  body.appendChild(tickerRow);
+  function refreshTickerRow() {
+    tickerRow.textContent = '';
+    const tk = parseTicker(card.t);
+    tickerRow.hidden = !tk;
+    if (!tk) return;
+    const link = el('a', 'ticker-link modal-ticker-link');
+    link.href = tickerUrl(tk.symbol);
+    link.target = '_blank';
+    link.rel = 'noopener noreferrer';
+    const glyph = el('span', 'ticker-glyph');
+    glyph.appendChild(svgIcon(ICONS.trend, 13, 1.7));
+    link.append(glyph, el('span', 'ticker-sym', tk.symbol), el('span', 'modal-ticker-cta', 'Open in Terminal'));
+    const go = el('span', 'ticker-go');
+    go.appendChild(svgIcon('M5 3l4 5-4 5', 11, 1.8));
+    link.appendChild(go);
+    tickerRow.appendChild(link);
+  }
+  refreshTickerRow();
 
   /* color row */
   const colorSec = section('Color');
@@ -6148,19 +6742,64 @@ function openCardModal(cardId) {
 
   backdrop.appendChild(modal);
   root.appendChild(backdrop);
-  requestAnimationFrame(() => backdrop.classList.add('show'));
+
+  // Expand from the clicked card: the modal starts scaled/translated onto the
+  // card's footprint, then springs open into the enlarged editor (FLIP).
+  if (sourceRect && sourceRect.width > 1 && !_reducedMotion()) {
+    modal.style.transition = 'none';         // measure the resting rect cleanly
+    modal.style.transform = 'none';
+    const to = modal.getBoundingClientRect();
+    modal.classList.add('expanding');
+    modal.style.transformOrigin = '0 0';
+    modal.style.transform = _flipTransform(sourceRect, to);
+    modal.style.opacity = '0.4';
+    modal.getBoundingClientRect();            // commit the start frame
+    modal.style.transition = '';             // hand off to the .expanding transition
+    requestAnimationFrame(() => {
+      backdrop.classList.add('show');
+      modal.style.transform = 'none';
+      modal.style.opacity = '1';
+    });
+    const cleanup = (e) => {
+      if (e && e.propertyName && e.propertyName !== 'transform') return;
+      modal.classList.remove('expanding');
+      modal.style.transformOrigin = '';
+      modal.style.transform = '';
+      modal.style.opacity = '';
+      modal.removeEventListener('transitionend', cleanup);
+    };
+    modal.addEventListener('transitionend', cleanup);
+    setTimeout(() => cleanup({ propertyName: 'transform' }), 460);
+  } else {
+    requestAnimationFrame(() => backdrop.classList.add('show'));
+  }
 
   let closed = false;
   function closeModal() {
     if (closed) return;
     closed = true;
     refreshModalAttachments = null;
-    backdrop.classList.remove('show');
-    setTimeout(() => backdrop.remove(), 180);
-    window.removeEventListener('keydown', onKey);
     if (!card.t) card.t = 'Untitled';
     save.flush();
-    rerenderBoard(board.id);
+    rerenderBoard(board.id);                  // refresh the card node before measuring it
+    window.removeEventListener('keydown', onKey);
+    const node = $('.card[data-id="' + card.id + '"]');
+    const to = node ? node.getBoundingClientRect() : null;
+    if (to && to.width > 1 && !_reducedMotion()) {
+      // reverse the expand: collapse the editor back down into the card
+      const from = modal.getBoundingClientRect();
+      modal.classList.add('expanding');
+      modal.style.transformOrigin = '0 0';
+      modal.style.transform = 'none';
+      modal.getBoundingClientRect();          // commit
+      backdrop.classList.remove('show');
+      modal.style.transform = _flipTransform(to, from);
+      modal.style.opacity = '0';
+      setTimeout(() => backdrop.remove(), 300);
+    } else {
+      backdrop.classList.remove('show');
+      setTimeout(() => backdrop.remove(), 180);
+    }
   }
   backdrop.addEventListener('mousedown', (e) => { if (e.target === backdrop) closeModal(); });
   function onKey(e) {

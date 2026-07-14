@@ -31,6 +31,11 @@ the light color — web manifests can't follow the in-app theme.
 - **Spatial canvas** — boards float on a dot-grid desk. Drag a board by its header to move it
   anywhere; drag empty canvas to pan; **double-click empty canvas to create a board**;
   press **Tidy** to snap all boards into a clean grid ordered by where they sit.
+- **Board settings** — each board has its own settings, reached from the header's `⋯` menu
+  or a **right-click** anywhere on the board (right-click empty canvas for *New board here*).
+  Give a board a **description** and toggle *Show description on the board* to pin it under the
+  header; set an **accent color** (a top stripe); **collapse** it to a header-only strip; and
+  **Duplicate**, **Move to another workspace**, or **Delete** — all with an undo toast.
 - **Cards** — click *Add a card* for a title (description optional), Enter for rapid entry.
   Drag cards to reorder or move across boards. Click a card to expand it: color, tags,
   optional due date, description, attachments. Click outside to close — edits autosave.

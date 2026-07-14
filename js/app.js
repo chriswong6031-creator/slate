@@ -4,7 +4,17 @@
 /* ---------- card modal ---------- */
 let refreshModalAttachments = null;
 
-function openCardModal(cardId) {
+// Transform that maps `toRect` (a resting element) onto `fromRect` (its origin),
+// with transform-origin at 0 0 — the heart of the card→editor expand animation.
+function _flipTransform(fromRect, toRect) {
+  const scale = Math.max(0.08, Math.min(1, fromRect.width / toRect.width));
+  return 'translate(' + (fromRect.left - toRect.left) + 'px,' + (fromRect.top - toRect.top) + 'px) scale(' + scale + ')';
+}
+function _reducedMotion() {
+  return window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+}
+
+function openCardModal(cardId, sourceRect) {
   const found = findCard(cardId);
   if (!found) return;
   const { card, board } = found;
@@ -33,10 +43,32 @@ function openCardModal(cardId) {
   title.rows = 1;
   title.value = card.t;
   title.placeholder = 'Card title';
-  title.addEventListener('input', () => { card.t = title.value.trim() || card.t; save(); });
+  title.addEventListener('input', () => { card.t = title.value.trim() || card.t; save(); refreshTickerRow(); });
   title.addEventListener('blur', () => { if (!title.value.trim()) title.value = card.t; });
   body.appendChild(title);
   autoGrow(title);
+
+  /* ticker quick-link — shown when the title is a $TICKER note; jumps to the Terminal */
+  const tickerRow = el('div', 'modal-ticker');
+  body.appendChild(tickerRow);
+  function refreshTickerRow() {
+    tickerRow.textContent = '';
+    const tk = parseTicker(card.t);
+    tickerRow.hidden = !tk;
+    if (!tk) return;
+    const link = el('a', 'ticker-link modal-ticker-link');
+    link.href = tickerUrl(tk.symbol);
+    link.target = '_blank';
+    link.rel = 'noopener noreferrer';
+    const glyph = el('span', 'ticker-glyph');
+    glyph.appendChild(svgIcon(ICONS.trend, 13, 1.7));
+    link.append(glyph, el('span', 'ticker-sym', tk.symbol), el('span', 'modal-ticker-cta', 'Open in Terminal'));
+    const go = el('span', 'ticker-go');
+    go.appendChild(svgIcon('M5 3l4 5-4 5', 11, 1.8));
+    link.appendChild(go);
+    tickerRow.appendChild(link);
+  }
+  refreshTickerRow();
 
   /* color row */
   const colorSec = section('Color');
@@ -254,19 +286,64 @@ function openCardModal(cardId) {
 
   backdrop.appendChild(modal);
   root.appendChild(backdrop);
-  requestAnimationFrame(() => backdrop.classList.add('show'));
+
+  // Expand from the clicked card: the modal starts scaled/translated onto the
+  // card's footprint, then springs open into the enlarged editor (FLIP).
+  if (sourceRect && sourceRect.width > 1 && !_reducedMotion()) {
+    modal.style.transition = 'none';         // measure the resting rect cleanly
+    modal.style.transform = 'none';
+    const to = modal.getBoundingClientRect();
+    modal.classList.add('expanding');
+    modal.style.transformOrigin = '0 0';
+    modal.style.transform = _flipTransform(sourceRect, to);
+    modal.style.opacity = '0.4';
+    modal.getBoundingClientRect();            // commit the start frame
+    modal.style.transition = '';             // hand off to the .expanding transition
+    requestAnimationFrame(() => {
+      backdrop.classList.add('show');
+      modal.style.transform = 'none';
+      modal.style.opacity = '1';
+    });
+    const cleanup = (e) => {
+      if (e && e.propertyName && e.propertyName !== 'transform') return;
+      modal.classList.remove('expanding');
+      modal.style.transformOrigin = '';
+      modal.style.transform = '';
+      modal.style.opacity = '';
+      modal.removeEventListener('transitionend', cleanup);
+    };
+    modal.addEventListener('transitionend', cleanup);
+    setTimeout(() => cleanup({ propertyName: 'transform' }), 460);
+  } else {
+    requestAnimationFrame(() => backdrop.classList.add('show'));
+  }
 
   let closed = false;
   function closeModal() {
     if (closed) return;
     closed = true;
     refreshModalAttachments = null;
-    backdrop.classList.remove('show');
-    setTimeout(() => backdrop.remove(), 180);
-    window.removeEventListener('keydown', onKey);
     if (!card.t) card.t = 'Untitled';
     save.flush();
-    rerenderBoard(board.id);
+    rerenderBoard(board.id);                  // refresh the card node before measuring it
+    window.removeEventListener('keydown', onKey);
+    const node = $('.card[data-id="' + card.id + '"]');
+    const to = node ? node.getBoundingClientRect() : null;
+    if (to && to.width > 1 && !_reducedMotion()) {
+      // reverse the expand: collapse the editor back down into the card
+      const from = modal.getBoundingClientRect();
+      modal.classList.add('expanding');
+      modal.style.transformOrigin = '0 0';
+      modal.style.transform = 'none';
+      modal.getBoundingClientRect();          // commit
+      backdrop.classList.remove('show');
+      modal.style.transform = _flipTransform(to, from);
+      modal.style.opacity = '0';
+      setTimeout(() => backdrop.remove(), 300);
+    } else {
+      backdrop.classList.remove('show');
+      setTimeout(() => backdrop.remove(), 180);
+    }
   }
   backdrop.addEventListener('mousedown', (e) => { if (e.target === backdrop) closeModal(); });
   function onKey(e) {

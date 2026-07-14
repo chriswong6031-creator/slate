@@ -49,7 +49,11 @@ function openPopover(anchor, build, opts) {
   pop.style.top = Math.min(r.bottom + 6, window.innerHeight - pop.offsetHeight - 12) + 'px';
   pop.style.left = clamp(r.left, 8, window.innerWidth - pop.offsetWidth - 8) + 'px';
   requestAnimationFrame(() => pop.classList.add('show'));
-  function onOutside(e) { if (!pop.contains(e.target) && e.target !== anchor && !anchor.contains(e.target)) close(); }
+  // stopPropagation so a dismiss-click on a popover layered over a modal doesn't
+  // also reach the modal backdrop's mousedown handler and close the modal too
+  // (mirrors the Escape path in onKey). Only pointer-based (pointerdown) canvas
+  // and drag handlers exist elsewhere, so stopping mousedown here is safe.
+  function onOutside(e) { if (!pop.contains(e.target) && e.target !== anchor && !anchor.contains(e.target)) { e.stopPropagation(); close(); } }
   function onKey(e) { if (e.key === 'Escape') { e.stopPropagation(); close(); } }
   window.addEventListener('mousedown', onOutside, true);
   window.addEventListener('keydown', onKey, true);
@@ -228,13 +232,138 @@ function startBoardRename(boardNode, board, isNew) {
   });
 }
 
-/* ---------- board menu ---------- */
+/* ---------- board actions (shared by the 3-dot menu, right-click menu, settings) ---------- */
+
+// A synthetic popover anchor at an arbitrary screen point, so a right-click can
+// open the same menu the 3-dot button does. `contains` never matches, so the
+// popover's outside-click handler behaves normally.
+function pointAnchor(x, y) {
+  return {
+    getBoundingClientRect: () => ({ left: x, right: x, top: y, bottom: y, width: 0, height: 0, x, y }),
+    contains: () => false,
+  };
+}
+
+function deleteBoard(board) {
+  const ws = activeWs();
+  const idx = ws.boards.indexOf(board);
+  if (idx < 0) return;
+  ws.boards.splice(idx, 1);
+  save();
+  rerenderBoard(board.id);
+  $('#hint').hidden = ws.boards.length > 0;
+  undoableToast('Board deleted', () => ws.boards.splice(clamp(idx, 0, ws.boards.length), 0, board));
+}
+
+function toggleBoardCollapsed(board) {
+  board.collapsed = !board.collapsed;
+  save();
+  rerenderBoard(board.id);
+}
+
+function duplicateBoard(board) {
+  const ws = activeWs();
+  const copy = JSON.parse(JSON.stringify(board));
+  copy.id = uid();
+  copy.name = (board.name ? board.name + ' copy' : 'Untitled copy');
+  copy.collapsed = false;
+  copy.x = clamp(board.x + 28, 0, CANVAS_W - BOARD_W);
+  copy.y = clamp(board.y + 28, 0, CANVAS_H - 100);
+  // fresh card ids so the two boards never collide; attachment blobs are shared
+  // by reference (the GC keeps a blob while any card still points at it)
+  for (const c of copy.cards) c.id = uid();
+  for (const c of copy.done) c.id = uid();
+  const idx = ws.boards.indexOf(board);
+  ws.boards.splice(idx + 1, 0, copy);
+  save();
+  const node = boardEl(copy);
+  node.classList.add('board-enter');
+  $('#canvas').appendChild(node);
+  bringToFront(node);
+  $('#hint').hidden = true;
+  toast('Board duplicated', {
+    action: { label: 'Undo', fn: () => {
+      const j = ws.boards.indexOf(copy);
+      if (j >= 0) ws.boards.splice(j, 1);
+      save();
+      rerenderBoard(copy.id);
+    } },
+  });
+}
+
+function moveBoardToWorkspace(board, targetWs) {
+  const from = activeWs();
+  if (!targetWs || targetWs.id === from.id) return;
+  const idx = from.boards.indexOf(board);
+  if (idx < 0) return;
+  from.boards.splice(idx, 1);
+  targetWs.boards.push(board);
+  save();
+  rerenderBoard(board.id); // drops it from the current canvas
+  $('#hint').hidden = from.boards.length > 0;
+  undoableToast('Board moved to "' + targetWs.name + '"', () => {
+    const j = targetWs.boards.indexOf(board);
+    if (j >= 0) targetWs.boards.splice(j, 1);
+    from.boards.splice(clamp(idx, 0, from.boards.length), 0, board);
+  });
+}
+
+// Second-level menu listing every other workspace (plus "New workspace…").
+// afterMove (optional) runs once a move is committed — the settings modal uses
+// it to close itself, since the board it was editing has left this workspace.
+function openMoveToWorkspaceMenu(anchor, board, afterMove) {
+  openPopover(anchor, (pop, close) => {
+    pop.classList.add('ws-pop');
+    pop.appendChild(el('div', 'pop-heading', 'Move to workspace'));
+    const others = state.ws.filter(w => w.id !== state.activeWs);
+    for (const w of others) {
+      const item = popItem(w.name, ICONS.board || null, () => {
+        close();
+        moveBoardToWorkspace(board, w);
+        if (afterMove) afterMove();
+      });
+      item.appendChild(el('span', 'pop-item-count', w.boards.length + (w.boards.length === 1 ? ' board' : ' boards')));
+      pop.appendChild(item);
+    }
+    if (others.length) pop.appendChild(el('div', 'pop-divider'));
+    pop.appendChild(popItem('New workspace…', ICONS.plus, () => {
+      close();
+      const w = newWorkspace(board.name ? board.name + ' space' : 'New space');
+      state.ws.push(w);
+      moveBoardToWorkspace(board, w);
+      if (afterMove) afterMove();
+    }));
+  });
+}
+
+/* ---------- board menu (3-dot button + right-click) ---------- */
 function openBoardMenu(anchor, board) {
   openPopover(anchor, (pop, close) => {
+    pop.appendChild(popItem('Board settings…', ICONS.settings, () => {
+      close();
+      openBoardSettings(board);
+    }));
     pop.appendChild(popItem('Rename board', ICONS.pencil, () => {
       close();
       const node = $('.board[data-id="' + board.id + '"]');
-      startBoardRename(node, board, false);
+      if (node) startBoardRename(node, board, false);
+    }));
+    pop.appendChild(popItem((board.desc && board.desc.trim())
+      ? (board.showDesc ? 'Hide description' : 'Show description')
+      : 'Add description…', ICONS.text, () => {
+      close();
+      if (board.desc && board.desc.trim()) {
+        board.showDesc = !board.showDesc;
+        save();
+        rerenderBoard(board.id);
+      } else {
+        openBoardSettings(board, { focus: 'desc' });
+      }
+    }));
+    pop.appendChild(popItem(board.collapsed ? 'Expand board' : 'Collapse board',
+      board.collapsed ? 'M4 6l4 4 4-4' : 'M4 10l4-4 4 4', () => {
+      close();
+      toggleBoardCollapsed(board);
     }));
     if (board.done.length) {
       pop.appendChild(popItem(board.showDone ? 'Hide completed' : 'Show completed (' + board.done.length + ')', ICONS.check, () => {
@@ -244,17 +373,168 @@ function openBoardMenu(anchor, board) {
         rerenderBoard(board.id);
       }));
     }
+    pop.appendChild(popItem('Duplicate board', ICONS.copy, () => {
+      close();
+      duplicateBoard(board);
+    }));
+    pop.appendChild(popItem('Move to workspace…', ICONS.move, () => {
+      close();
+      openMoveToWorkspaceMenu(anchor, board);
+    }));
+    pop.appendChild(el('div', 'pop-divider'));
     pop.appendChild(popItem('Delete board', ICONS.trash, () => {
       close();
-      const ws = activeWs();
-      const idx = ws.boards.indexOf(board);
-      ws.boards.splice(idx, 1);
-      save();
-      rerenderBoard(board.id);
-      $('#hint').hidden = ws.boards.length > 0;
-      undoableToast('Board deleted', () => ws.boards.splice(clamp(idx, 0, ws.boards.length), 0, board));
+      deleteBoard(board);
     }, 'danger'));
   });
+}
+
+/* ---------- board settings modal ---------- */
+function openBoardSettings(board, opts) {
+  opts = opts || {};
+  const root = $('#modalRoot');
+  root.textContent = '';
+
+  const backdrop = el('div', 'modal-backdrop');
+  const modal = el('div', 'modal board-settings' + (board.accent ? ' tint-' + board.accent : ''));
+  modal.dataset.boardId = board.id;
+  modal.appendChild(el('div', 'modal-accent'));
+
+  const closeBtnEl = el('button', 'modal-close-btn');
+  closeBtnEl.title = 'Close';
+  closeBtnEl.setAttribute('aria-label', 'Close');
+  closeBtnEl.appendChild(svgIcon(ICONS.x, 13, 2));
+  closeBtnEl.addEventListener('click', () => closeModal());
+  modal.appendChild(closeBtnEl);
+
+  const body = el('div', 'modal-body');
+  modal.appendChild(body);
+
+  function section(label) {
+    const s = el('div', 'modal-section');
+    s.appendChild(el('div', 'modal-label', label));
+    return s;
+  }
+
+  /* name */
+  const nameSec = section('Board name');
+  const nameInput = el('input', 'board-set-name');
+  nameInput.value = board.name || '';
+  nameInput.placeholder = 'Name this board';
+  nameInput.maxLength = 80;
+  nameInput.addEventListener('input', () => {
+    board.name = nameInput.value.trim() || board.name;
+    save();
+    rerenderBoard(board.id);
+  });
+  nameSec.appendChild(nameInput);
+  body.appendChild(nameSec);
+
+  /* description + show-on-board toggle */
+  const descSec = section('Description');
+  const desc = el('textarea', 'modal-desc');
+  desc.rows = 3;
+  desc.placeholder = 'Add a description for this board…';
+  desc.value = board.desc || '';
+  desc.addEventListener('input', () => {
+    board.desc = desc.value;
+    save();
+    if (board.showDesc) rerenderBoard(board.id);
+  });
+  descSec.appendChild(desc);
+  autoGrow(desc);
+  const showToggle = toggleRow('Show description on the board', board.showDesc, (on) => {
+    board.showDesc = on;
+    save();
+    rerenderBoard(board.id);
+  });
+  descSec.appendChild(showToggle);
+  body.appendChild(descSec);
+
+  /* accent color */
+  const colorSec = section('Accent color');
+  const swatches = el('div', 'swatches');
+  const noneBtn = accentSwatch(null, board.accent === null);
+  swatches.appendChild(noneBtn);
+  for (const cc of CARD_COLORS) swatches.appendChild(accentSwatch(cc, board.accent === cc));
+  colorSec.appendChild(swatches);
+  body.appendChild(colorSec);
+
+  function accentSwatch(cc, active) {
+    const b = el('button', 'swatch' + (cc ? ' tint-' + cc : ' swatch-none') + (active ? ' active' : ''));
+    b.title = cc ? COLOR_NAMES[cc] : 'No accent';
+    b.addEventListener('click', () => {
+      board.accent = cc;
+      save();
+      $$('.swatch', swatches).forEach(s => s.classList.remove('active'));
+      b.classList.add('active');
+      modal.className = 'modal board-settings' + (cc ? ' tint-' + cc : '');
+      rerenderBoard(board.id);
+    });
+    return b;
+  }
+
+  /* footer: move / duplicate / delete */
+  const foot = el('div', 'modal-foot board-set-foot');
+  const moveBtn = el('button', 'ghost-btn');
+  moveBtn.appendChild(svgIcon(ICONS.move, 13, 1.6));
+  moveBtn.appendChild(el('span', null, 'Move'));
+  moveBtn.addEventListener('click', () => openMoveToWorkspaceMenu(moveBtn, board, () => closeModal()));
+  const dupBtn = el('button', 'ghost-btn');
+  dupBtn.appendChild(svgIcon(ICONS.copy, 13, 1.6));
+  dupBtn.appendChild(el('span', null, 'Duplicate'));
+  dupBtn.addEventListener('click', () => { closeModal(); duplicateBoard(board); });
+  const spacer = el('span', 'board-set-foot-spacer');
+  const del = el('button', 'ghost-btn danger');
+  del.appendChild(svgIcon(ICONS.trash, 13, 1.5));
+  del.appendChild(el('span', null, 'Delete'));
+  del.addEventListener('click', () => { closeModal(); deleteBoard(board); });
+  foot.append(moveBtn, dupBtn, spacer, del);
+  modal.appendChild(foot);
+
+  backdrop.appendChild(modal);
+  root.appendChild(backdrop);
+  requestAnimationFrame(() => backdrop.classList.add('show'));
+
+  let closed = false;
+  function closeModal() {
+    if (closed) return;
+    closed = true;
+    backdrop.classList.remove('show');
+    setTimeout(() => backdrop.remove(), 180);
+    window.removeEventListener('keydown', onKey);
+    // every edit (name/desc/accent/toggle) already rerenders the board live, so
+    // the canvas node is current — just persist; no extra rerender needed
+    save.flush();
+  }
+  backdrop.addEventListener('mousedown', (e) => { if (e.target === backdrop) closeModal(); });
+  function onKey(e) {
+    if (e.key === 'Escape' && !activePopoverClose) closeModal();
+  }
+  window.addEventListener('keydown', onKey);
+
+  if (opts.focus === 'desc') { desc.focus(); }
+  else { nameInput.focus(); nameInput.setSelectionRange(nameInput.value.length, nameInput.value.length); }
+}
+
+// A labeled on/off switch used in the board settings modal.
+function toggleRow(labelText, initial, onChange) {
+  const row = el('div', 'board-set-toggle');
+  row.appendChild(el('span', 'board-set-toggle-label', labelText));
+  let on = !!initial;
+  const sw = el('button', 'switch' + (on ? ' on' : ''));
+  sw.type = 'button';
+  sw.setAttribute('role', 'switch');
+  sw.setAttribute('aria-checked', String(on));
+  sw.appendChild(el('span', 'switch-knob'));
+  sw.addEventListener('click', () => {
+    on = !on;
+    sw.classList.toggle('on', on);
+    sw.setAttribute('aria-checked', String(on));
+    onChange(on);
+  });
+  row.appendChild(sw);
+  return row;
 }
 
 /* ---------- file drag-in (attachments) ---------- */
@@ -302,6 +582,10 @@ function openBoardMenu(anchor, board) {
     const board = findBoard(boardNode.dataset.id);
     if (!board) return;
 
+    // ticker button is a real hyperlink into the Terminal — let it navigate,
+    // don't hijack the click to open the card editor
+    if (e.target.closest('.ticker-link')) return;
+
     const circle = e.target.closest('.complete-circle');
     if (circle) {
       const cardNode = circle.closest('.card');
@@ -317,6 +601,7 @@ function openBoardMenu(anchor, board) {
       return;
     }
     if (e.target.closest('.add-card-btn')) { openComposer(boardNode, board); return; }
+    if (e.target.closest('.board-collapse-btn')) { toggleBoardCollapsed(board); return; }
     if (e.target.closest('.board-menu-btn')) { openBoardMenu(e.target.closest('.board-menu-btn'), board); return; }
     const doneBar = e.target.closest('.done-bar');
     if (doneBar) {
@@ -336,11 +621,11 @@ function openBoardMenu(anchor, board) {
     }
     const cardNode = e.target.closest('.card');
     if (cardNode && !cardNode.classList.contains('done-card') && !e.target.closest('button')) {
-      openCardModal(cardNode.dataset.id);
+      openCardModal(cardNode.dataset.id, cardNode.getBoundingClientRect());
       return;
     }
     if (cardNode && cardNode.classList.contains('done-card') && !e.target.closest('button')) {
-      openCardModal(cardNode.dataset.id);
+      openCardModal(cardNode.dataset.id, cardNode.getBoundingClientRect());
     }
   });
 
@@ -351,4 +636,42 @@ function openBoardMenu(anchor, board) {
       startBoardRename(boardNode, findBoard(boardNode.dataset.id), false);
     }
   });
+
+  // Native right-click → context menu. On a board it opens the full board menu;
+  // on empty canvas it offers board-creation shortcuts. Editable fields keep
+  // their native menu so copy/paste still works while renaming or writing a card.
+  $('#canvas').addEventListener('contextmenu', (e) => {
+    if (state.view === 'brain') return;
+    if (e.target.closest('input, textarea, [contenteditable]')) return;
+    const boardNode = e.target.closest('.board');
+    if (boardNode) {
+      const board = findBoard(boardNode.dataset.id);
+      if (!board) return;
+      e.preventDefault();
+      bringToFront(boardNode);
+      openBoardMenu(pointAnchor(e.clientX, e.clientY), board);
+      return;
+    }
+    const canvas = $('#canvas');
+    if (e.target === canvas) {
+      e.preventDefault();
+      openCanvasMenu(e.clientX, e.clientY);
+    }
+  });
 })();
+
+/* ---------- empty-canvas context menu ---------- */
+function openCanvasMenu(clientX, clientY) {
+  openPopover(pointAnchor(clientX, clientY), (pop, close) => {
+    pop.appendChild(popItem('New board here', ICONS.plus, () => {
+      close();
+      const r = $('#canvas').getBoundingClientRect();
+      const x = clamp(clientX - r.left - BOARD_W / 2, 8, CANVAS_W - BOARD_W - 8);
+      const y = clamp(clientY - r.top - 20, 8, CANVAS_H - 100);
+      createBoardAt(x, y);
+    }));
+    if (activeWs().boards.length > 1) {
+      pop.appendChild(popItem('Tidy boards', ICONS.board, () => { close(); tidyBoards(); }));
+    }
+  });
+}

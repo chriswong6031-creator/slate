@@ -170,7 +170,7 @@ function paletteIndex() {
       renderAll();
     } });
     for (const b of w.boards) {
-      out.push({ type: 'board', label: b.name, hint: w.name, run: () => locateBoard(w, b) });
+      out.push({ type: 'board', label: b.name, hay: b.name + ' ' + (b.desc || ''), hint: w.name, run: () => locateBoard(w, b) });
       // FG-17: "Add card to <board>" quick-entry
       out.push({ type: 'addcard', label: 'Add card to ' + b.name, hint: w.name, run: () => {
         closeAnyModal();
