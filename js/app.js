@@ -378,27 +378,49 @@ function openSettings() {
             return;
           }
           const prev = JSON.parse(JSON.stringify(state));
-          for (const [id, dataUrl] of Object.entries(payload.files || {})) await filePut(id, dataUrl);
+          // Swap in the new state FIRST so that any filePut fallback (when IDB is
+          // unavailable) writes attachment blobs into the NEW state's _files rather
+          // than the old, about-to-be-discarded state. The IDB path is order-independent.
           state = migrateState(st); // normalizes shape so renderers can't throw on a crafted payload
+          for (const [id, dataUrl] of Object.entries(payload.files || {})) await filePut(id, dataUrl);
           saveNow();
 
           // v2: restore library IDB data (items + PDF blobs)
-          // Use SlateBackupDB directly so this works even when LibUser is not loaded (index.html).
-          let libCount = 0;
+          // This overwrites live library items/attachments by id and CANNOT be undone,
+          // so confirm before touching the library. Boards/notes are still imported if declined.
+          let libItems = 0, libFailed = 0;
           if (payload.library) {
-            const _libImporter = (window.SlateBackupDB && typeof window.SlateBackupDB.importAll === 'function')
-              ? window.SlateBackupDB
-              : (window.LibUser && typeof window.LibUser.importAll === 'function' ? window.LibUser : null);
-            if (_libImporter) {
-              try { libCount = await _libImporter.importAll(payload.library); } catch (_) {}
+            const proceed = confirm(
+              'Importing will overwrite any library items or attachments that share an id ' +
+              'with this backup. This part CANNOT be undone (only boards/workspaces are undoable).\n\n' +
+              'OK to import library items, or Cancel to import boards/notes only.');
+            if (proceed) {
+              const _libImporter = (window.SlateBackupDB && typeof window.SlateBackupDB.importAll === 'function')
+                ? window.SlateBackupDB
+                : (window.LibUser && typeof window.LibUser.importAll === 'function' ? window.LibUser : null);
+              if (_libImporter) {
+                try {
+                  const res = await _libImporter.importAll(payload.library);
+                  libItems  = (res && typeof res.items === 'number') ? res.items : 0;
+                  libFailed = (res && typeof res.failed === 'number') ? res.failed : 0;
+                } catch (_) { libFailed = 1; }
+              }
             }
           }
 
-          // register the undo BEFORE rendering — even if a render fails, the restore path exists
+          // register the undo BEFORE rendering — even if a render fails, the restore path exists.
+          // Undo only reverts boards/workspaces; library items are already replaced (not undoable).
           const msg = 'Backup imported — replaced ' + prev.ws.length +
             (prev.ws.length === 1 ? ' workspace' : ' workspaces') +
-            (libCount ? ' + ' + libCount + ' library item' + (libCount !== 1 ? 's' : '') : '');
+            (libItems ? '; ' + libItems + ' library item' + (libItems !== 1 ? 's' : '') + ' replaced (not undoable)' : '');
+          // Undo toast is board/workspace-only; keep it plain. Surface library
+          // write failures via a separate warning toast (toast() is single-slot,
+          // so the failure message shown last is the one the user sees).
           undoableToast(msg, () => { state = prev; });
+          if (libFailed > 0) {
+            toast('Imported ' + libItems + ' library item' + (libItems !== 1 ? 's' : '') +
+              ' — ' + libFailed + ' failed (likely out of storage)', { tone: 'danger' });
+          }
           renderAll();
         } catch (e) {
           console.error(e);

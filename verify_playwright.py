@@ -92,25 +92,38 @@ with sync_playwright() as pw:
     b0.locator(".card", has_text="Click my circle").locator(".complete-circle").click()
     page.wait_for_timeout(1100)
 
-    # 5. card modal: color, tag, due, desc
-    page.locator(".card", has_text="Buy espresso beans").click()
+    # 5. card features: color/tag/due live in a side popover (⊕ button, no modal);
+    #    title/description are edited inline on the note.
+    card = page.locator(".card", has_text="Buy espresso beans")
+    card.locator(".card-feat-btn").click()  # ⊕ opens the features popover
     page.wait_for_timeout(350)
-    check("modal: opens", page.locator(".modal").count() == 1)
-    page.locator(".swatch.tint-c7").click()
-    page.locator(".tag-input").fill("errand")
+    check("features popover: opens", page.locator(".card-features-pop").count() == 1)
+    pop = page.locator(".card-features-pop")
+    pop.locator(".swatch.tint-c7").click()
+    pop.locator(".tag-input").fill("errand")
     page.keyboard.press("Enter")
-    page.locator(".due-input").fill("2026-07-15")
-    page.locator(".modal-desc").fill("The good ones from the roastery on 5th.")
+    pop.locator(".due-input").fill("2026-07-15")
     page.wait_for_timeout(200)
     page.screenshot(path=str(SHOTS / "02_modal.png"))
-    page.mouse.click(30, 450)  # backdrop
+    page.mouse.click(30, 450)  # outside click → dismiss popover
     page.wait_for_timeout(350)
-    check("modal: closes on outside click", page.locator(".modal").count() == 0)
+    check("features popover: closes on outside click", page.locator(".card-features-pop").count() == 0)
+
+    # description is edited inline: first click expands the note, then clicking the
+    # desc affordance opens a textarea; commit by blurring (click empty canvas).
     card = page.locator(".card", has_text="Buy espresso beans")
-    check("modal edits: tint applied", "tint-c7" in (card.get_attribute("class") or ""))
-    check("modal edits: tag chip", card.locator(".tag-chip", has_text="errand").count() == 1)
-    check("modal edits: due chip", card.locator(".due-chip").count() == 1)
-    check("modal edits: desc indicator", card.locator(".desc-chip").count() == 1)
+    card.click()  # expand the note
+    page.wait_for_timeout(300)
+    card.locator(".card-desc-wrap").click()  # open the inline description editor
+    page.wait_for_timeout(150)
+    page.locator(".card-desc-inline").fill("The good ones from the roastery on 5th.")
+    page.mouse.click(30, 450)  # blur → commit
+    page.wait_for_timeout(350)
+    card = page.locator(".card", has_text="Buy espresso beans")
+    check("card edits: tint applied", "tint-c7" in (card.get_attribute("class") or ""))
+    check("card edits: tag chip", card.locator(".tag-chip", has_text="errand").count() == 1)
+    check("card edits: due chip", card.locator(".due-chip").count() == 1)
+    check("card edits: description saved", "roastery" in (card.locator(".card-desc-text").inner_text() or ""))
 
     # 6. attachment via simulated file drop (image)
     card_box = card.bounding_box()
@@ -224,10 +237,11 @@ with sync_playwright() as pw:
         "() => { const s = JSON.parse(localStorage.getItem('slate.state.v1')); return s.v === 1 && s.ws.length === 2; }")
     check("export: state JSON valid, 2 workspaces", state_ok)
 
-    # 14. delete card with undo
-    page.locator(".card", has_text="Buy espresso beans").click()
+    # 14. delete card with undo (Delete lives in the features popover now, no modal)
+    card = page.locator(".card", has_text="Buy espresso beans")
+    card.locator(".card-feat-btn").click()
     page.wait_for_timeout(300)
-    page.locator(".modal-foot .ghost-btn.danger").click()
+    page.locator(".card-features-pop .feat-del").click()
     page.wait_for_timeout(300)
     check("delete: card gone", page.locator(".card", has_text="Buy espresso beans").count() == 0)
     check("delete: undo toast", page.locator(".toast-action", has_text="Undo").count() == 1)
@@ -497,8 +511,7 @@ with sync_playwright() as pw:
     page.wait_for_timeout(600)
     check("palette: opens card in boards view",
           page.evaluate("document.body.dataset.view") == "tasks"
-          and page.locator(".modal-title").count() == 1
-          and page.locator(".modal-title").input_value() == "Buy espresso beans")
+          and page.locator(".card.expanded", has_text="Buy espresso beans").count() == 1)
     page.mouse.click(30, 550)
     page.wait_for_timeout(300)
     page.locator("#searchBtn").click()
@@ -555,22 +568,25 @@ with sync_playwright() as pw:
         }""")
     check("regression: no duplicate in done", dup["inDone"] == 1 and dup["inCards"] == 0, str(dup))
 
-    # 17. REGRESSION: dropping a file on the OPEN modal attaches it
-    page.locator(".card", has_text="Buy espresso beans").click()
+    # 17. REGRESSION: dropping a file while the features popover is open refreshes its
+    #     attachment grid live (the popover, not a modal, now holds the att tiles)
+    card = page.locator(".card", has_text="Buy espresso beans")
+    card.locator(".card-feat-btn").click()
     page.wait_for_timeout(300)
     tiles_before = page.locator(".att-tile").count()
+    box = card.bounding_box()
     page.evaluate(
-        """() => {
-            const m = document.querySelector('.modal');
-            const r = m.getBoundingClientRect();
+        """([cx, cy]) => {
             const dt = new DataTransfer();
-            dt.items.add(new File([new Blob(['modal drop'])], 'dropped-on-modal.txt', {type: 'text/plain'}));
-            const opts = {dataTransfer: dt, clientX: r.left + r.width/2, clientY: r.top + 40, cancelable: true, bubbles: true};
-            m.dispatchEvent(new DragEvent('dragover', opts));
-            m.dispatchEvent(new DragEvent('drop', opts));
-        }""")
+            dt.items.add(new File([new Blob(['open-editor drop'])], 'dropped-while-open.txt', {type: 'text/plain'}));
+            const opts = {dataTransfer: dt, clientX: cx, clientY: cy, cancelable: true, bubbles: true};
+            window.dispatchEvent(new DragEvent('dragover', opts));
+            window.dispatchEvent(new DragEvent('drop', opts));
+        }""",
+        [box["x"] + box["width"] / 2, box["y"] + 10])
     page.wait_for_timeout(600)
-    check("regression: modal drop attaches file", page.locator(".att-tile").count() == tiles_before + 1,
+    check("regression: drop while editor open refreshes att grid",
+          page.locator(".att-tile").count() == tiles_before + 1,
           f"{tiles_before} -> {page.locator('.att-tile').count()}")
     page.mouse.click(30, 450)
     page.wait_for_timeout(300)
@@ -659,9 +675,14 @@ with sync_playwright() as pw:
     check("mobile: boards render", p3.locator(".board").count() == 3)
     p3.locator(".card", has_text="Plan the week").click()
     p3.wait_for_timeout(400)
-    mb = p3.locator(".modal").bounding_box()
-    check("mobile: modal is a full-width sheet", mb is not None and abs(mb["width"] - 390) < 2
-          and mb["y"] + mb["height"] >= 842, str(mb))
+    check("mobile: tapping a note expands it inline (no modal)",
+          p3.locator(".card.expanded", has_text="Plan the week").count() == 1
+          and p3.locator(".modal").count() == 0)
+    p3.locator(".card", has_text="Plan the week").locator(".card-feat-btn").click()
+    p3.wait_for_timeout(300)
+    fb = p3.locator(".card-features-pop").bounding_box()
+    check("mobile: features popover opens and fits viewport",
+          fb is not None and fb["width"] <= 390 and fb["x"] >= -1, str(fb))
     p3.screenshot(path=str(SHOTS / "09_mobile_sheet.png"))
     p3.mouse.click(195, 10)
     p3.wait_for_timeout(300)
@@ -755,20 +776,23 @@ with sync_playwright() as pw:
           f"key={after_save_key} state.theme={saved_state_theme}")
     ctx5.close()
 
-    # UX-01: Card modal has visible close button (.modal-close-btn)
+    # UX-01: note editing is inline (no modal); the features popover is dismissable
     ctx6 = browser.new_context(viewport={"width": 1440, "height": 900})
     p6 = ctx6.new_page()
     p6.goto(BASE)
     p6.wait_for_timeout(400)
-    # Open a card modal
-    p6.locator(".card").first.click()
+    first = p6.locator(".card").first
+    first.click()  # first click expands the note inline
     p6.wait_for_timeout(350)
-    close_btn = p6.locator(".modal-close-btn")
-    check("w1-UX-01: modal has close button", close_btn.count() == 1)
-    check("w1-UX-01: close button is visible", close_btn.is_visible())
-    close_btn.click()
+    check("w1-UX-01: clicking a note expands it inline (no modal)",
+          p6.locator(".card.expanded").count() >= 1 and p6.locator(".modal").count() == 0)
+    p6.locator(".card.expanded").first.locator(".card-feat-btn").click()
     p6.wait_for_timeout(300)
-    check("w1-UX-01: close button dismisses modal", p6.locator(".modal").count() == 0)
+    check("w1-UX-01: features popover opens", p6.locator(".card-features-pop").count() == 1)
+    p6.mouse.click(30, 550)  # outside click dismisses the popover
+    p6.wait_for_timeout(300)
+    check("w1-UX-01: outside click dismisses the editor popover",
+          p6.locator(".card-features-pop").count() == 0)
     ctx6.close()
 
     # UX-09: Palette theme toggle shows current-aware label

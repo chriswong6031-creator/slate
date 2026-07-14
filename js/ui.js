@@ -109,15 +109,19 @@ function openLightbox(att, dataUrl) {
 }
 
 /* ---------- complete / restore ritual ---------- */
+// transient (session-only) re-entry guard keyed by card id — mirrors the
+// _expandedCards Set in render.js. Kept OFF the persisted card so a save flush
+// mid-animation can't serialize an in-flight flag and lock the card forever.
+const _completing = new Set();
 function completeCard(cardId) {
   const found = findCard(cardId);
   if (!found || found.done) return;
   // state-level re-entry guard: a mid-ritual re-render swaps the DOM node, so a class check is not enough
-  if (found.card._completing) return;
-  found.card._completing = true;
+  if (_completing.has(cardId)) return;
+  _completing.add(cardId);
   const node = $('.card[data-id="' + cardId + '"]');
   const doMove = () => {
-    delete found.card._completing;
+    _completing.delete(cardId);
     forgetCardUiState(cardId); // leaving the active list — drop its transient expand state
     const idx = found.board.cards.indexOf(found.card);
     if (idx >= 0) found.board.cards.splice(idx, 1);
@@ -179,7 +183,9 @@ function openComposer(boardNode, board, draft) {
     title.value = draft.t;
     desc.value = draft.d;
     desc.hidden = draft.dHidden;
-    if (draft.focused) title.focus();
+    // restore focus to the field that had it before the re-render
+    if (draft.focusField === 'desc') desc.focus();
+    else if (draft.focusField === 'title') title.focus();
   } else {
     title.focus();
   }
@@ -425,11 +431,23 @@ function openBoardSettings(board, opts) {
   nameInput.value = board.name || '';
   nameInput.placeholder = 'Name this board';
   nameInput.maxLength = 80;
+  // store the raw value live (don't clobber to the old name mid-keystroke); the
+  // 'Untitled' fallback for an empty/whitespace name is applied on commit
+  // (blur / modal close), mirroring startBoardRename's commit-on-blur semantics
+  const commitName = () => {
+    if (!nameInput.value.trim()) {
+      board.name = 'Untitled';
+      nameInput.value = board.name;
+      save();
+      rerenderBoard(board.id);
+    }
+  };
   nameInput.addEventListener('input', () => {
-    board.name = nameInput.value.trim() || board.name;
+    board.name = nameInput.value;
     save();
     rerenderBoard(board.id);
   });
+  nameInput.addEventListener('blur', commitName);
   nameSec.appendChild(nameInput);
   body.appendChild(nameSec);
 
@@ -492,6 +510,7 @@ function openBoardSettings(board, opts) {
   function closeModal() {
     if (closed) return;
     closed = true;
+    commitName(); // apply the 'Untitled' fallback if the name was left empty
     backdrop.classList.remove('show');
     setTimeout(() => backdrop.remove(), 180);
     window.removeEventListener('keydown', onKey);
@@ -558,6 +577,11 @@ function toggleRow(labelText, initial, onChange) {
     if (!found) return;
     const n = await addAttachmentsToCard(found.card, e.dataTransfer.files);
     if (n) {
+      // an open inline title/desc editor commits only on blur, and replaceWith
+      // (in rerenderBoard) doesn't fire blur — flush it first so its unsaved text
+      // isn't discarded by the re-render
+      const inl = $('.card-title-inline') || $('.card-desc-inline');
+      if (inl) inl.blur();
       rerenderBoard(found.board.id);
       if (typeof _refreshFeaturesAtts === 'function' && _refreshFeaturesAtts) _refreshFeaturesAtts(found.card);
       toast(n === 1 ? 'File attached' : n + ' files attached');

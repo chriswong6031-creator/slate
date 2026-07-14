@@ -114,6 +114,22 @@ let zCounter = 10;
 function newCard(title) {
   return { id: uid(), t: title, d: '', color: null, tags: [], due: null, at: [], created: Date.now(), completed: null };
 }
+/* coerce a (possibly legacy/imported/corrupt) card object into the newCard shape
+   so renderers never trip on missing strings/arrays; called from migrateState */
+function normalizeCard(c) {
+  if (typeof c.id !== 'string') c.id = uid();
+  c.t = typeof c.t === 'string' ? c.t : '';
+  c.d = typeof c.d === 'string' ? c.d : '';
+  if (!Array.isArray(c.tags)) c.tags = [];
+  if (!Array.isArray(c.at)) c.at = [];
+  if (!('color' in c)) c.color = null;
+  if (!('due' in c)) c.due = null;
+  if (typeof c.created !== 'number') c.created = Date.now();
+  if (!('completed' in c)) c.completed = null;
+  // strip any stale transient completion flag persisted by an interrupted animation
+  delete c._completing;
+  return c;
+}
 function newBoard(name, x, y) {
   return { id: uid(), name: name, x: Math.round(x), y: Math.round(y), cards: [], done: [], showDone: false, collapsed: false, accent: null, showCardDescs: false, w: null, h: null };
 }
@@ -176,6 +192,14 @@ function migrateState(s) {
         // resizable boards: explicit width/height in px, or null for the default
         if (!(typeof b.w === 'number' && b.w > 0)) b.w = null;
         if (!(typeof b.h === 'number' && b.h > 0)) b.h = null;
+        // guarantee the note arrays and per-card shape so a legacy/imported/
+        // corrupt payload can never reach a renderer (String(b.cards.length),
+        // for (const c of b.cards), for (const t of c.tags), c.at.length, …)
+        if (!Array.isArray(b.cards)) b.cards = [];
+        if (!Array.isArray(b.done)) b.done = [];
+        if (typeof b.showDone !== 'boolean') b.showDone = false;
+        b.cards = b.cards.filter(c => c && typeof c === 'object' && !Array.isArray(c)).map(normalizeCard);
+        b.done = b.done.filter(c => c && typeof c === 'object' && !Array.isArray(c)).map(normalizeCard);
       }
     }
   }

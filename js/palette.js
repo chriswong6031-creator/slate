@@ -302,6 +302,7 @@ function openPalette() {
     results.textContent = '';
     visible = [];
     for (const [type, title] of PALETTE_GROUPS) {
+      if (visible.length >= 16) break; // global cap — stop before adding an orphan header
       const arr = byType.get(type);
       if (!arr || !arr.length) continue;
       results.appendChild(el('div', 'palette-group', title));
@@ -316,7 +317,7 @@ function openPalette() {
         row.appendChild(label);
         if (e.hint) row.appendChild(el('span', 'palette-row-hint', e.hint));
         row.addEventListener('click', () => pick(idx));
-        row.addEventListener('mousemove', () => { if (selected !== idx) { selected = idx; paint(); } });
+        row.addEventListener('mousemove', (ev) => { if (!ev.movementX && !ev.movementY) return; if (selected !== idx) { selected = idx; paint(); } });
         results.appendChild(row);
       }
     }

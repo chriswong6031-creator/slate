@@ -41,6 +41,21 @@
 
   /* ── inline transforms (run on already-escaped text) ── */
   function inlineTransforms(s, noteLinkResolver) {
+    // Placeholder tokenization: protect inline-code spans and anchor HTML from
+    // later passes so code contents stay literal and emphasis can't mutate hrefs.
+    // Sentinel uses a private-use codepoint that cannot occur in user text.
+    const STORE = [];
+    const SENTINEL = '';
+    function stash(html) {
+      const token = SENTINEL + STORE.length + SENTINEL;
+      STORE.push(html);
+      return token;
+    }
+
+    // 1. Extract inline `code` spans FIRST — store escaped literal contents.
+    s = s.replace(/`([^`\n]+?)`/g, (_, code) =>
+      stash('<code class="md-code-inline">' + code + '</code>'));
+
     // [[wikilinks]] — match against already-escaped content
     // The title may contain &amp; etc from escapeHtml — we resolve on decoded title
     s = s.replace(/\[\[([^\]]+?)\]\]/g, (_, rawTitle) => {
@@ -50,9 +65,9 @@
         .replace(/&quot;/g, '"').replace(/&#39;/g, "'");
       const href = noteLinkResolver ? noteLinkResolver(decoded) : null;
       if (href) {
-        return '<a class="md-wikilink" href="' + escapeHtml(href) + '" data-wikilink="' + escapeHtml(decoded) + '">' + rawTitle + '</a>';
+        return stash('<a class="md-wikilink" href="' + escapeHtml(href) + '" data-wikilink="' + escapeHtml(decoded) + '">' + rawTitle + '</a>');
       }
-      return '<span class="md-wikilink-dead" data-wikilink="' + escapeHtml(decoded) + '">' + rawTitle + '</span>';
+      return stash('<span class="md-wikilink-dead" data-wikilink="' + escapeHtml(decoded) + '">' + rawTitle + '</span>');
     });
 
     // [text](url) — explicit markdown links (https/http only)
@@ -61,7 +76,7 @@
       const decoded = rawUrl.replace(/&amp;/g, '&');
       const safe = safeHref(decoded);
       if (!safe) return text; // drop unsafe scheme, show text only
-      return '<a href="' + escapeHtml(safe) + '" target="_blank" rel="noopener noreferrer" class="md-link">' + text + '</a>';
+      return stash('<a href="' + escapeHtml(safe) + '" target="_blank" rel="noopener noreferrer" class="md-link">' + text + '</a>');
     });
 
     // bare URLs (https?://...)
@@ -70,15 +85,17 @@
       const decoded = url.replace(/&amp;/g, '&').replace(/&quot;/g, '"');
       const safe = safeHref(decoded);
       if (!safe) return pre + url;
-      return pre + '<a href="' + escapeHtml(safe) + '" target="_blank" rel="noopener noreferrer" class="md-link">' + url + '</a>';
+      return pre + stash('<a href="' + escapeHtml(safe) + '" target="_blank" rel="noopener noreferrer" class="md-link">' + url + '</a>');
     });
 
     // **bold** (non-greedy, no newlines)
     s = s.replace(/\*\*([^*\n]+?)\*\*/g, '<strong>$1</strong>');
     // *italic* (non-greedy, no newlines; avoid matching **)
     s = s.replace(/(?<!\*)\*([^*\n]+?)\*(?!\*)/g, '<em>$1</em>');
-    // `code` inline
-    s = s.replace(/`([^`\n]+?)`/g, '<code class="md-code-inline">$1</code>');
+
+    // Restore all placeholders (code spans + anchors) now that emphasis passes
+    // are done, so their contents were never mutated.
+    s = s.replace(new RegExp(SENTINEL + '(\\d+)' + SENTINEL, 'g'), (_, idx) => STORE[+idx]);
 
     return s;
   }
@@ -155,13 +172,15 @@
 
       // ── Ordered list (1. item) ──
       if (/^\d+\.\s+/.test(rawLine)) {
+        const m = rawLine.match(/^(\d+)\./);
+        const start = parseInt(m[1], 10);
         const items = [];
         while (i < lines.length && /^\d+\.\s+/.test(rawLines[i])) {
           const content = inlineTransforms(lines[i].replace(/^\d+\.\s+/, ''), noteLinkResolver);
           items.push('<li>' + content + '</li>');
           i++;
         }
-        out.push('<ol class="md-ol">' + items.join('') + '</ol>');
+        out.push('<ol class="md-ol"' + (start !== 1 ? ' start="' + start + '"' : '') + '>' + items.join('') + '</ol>');
         continue;
       }
 

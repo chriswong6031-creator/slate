@@ -53,9 +53,12 @@ function _getAll(db, storeName) {
 function _put(db, storeName, value) {
   return new Promise((resolve, reject) => {
     const tx  = db.transaction(storeName, 'readwrite');
-    const req = tx.objectStore(storeName).put(value);
-    req.onsuccess = () => resolve(req.result);
-    req.onerror   = () => reject(req.error);
+    tx.objectStore(storeName).put(value);
+    // Resolve on tx.oncomplete (not req.onsuccess) so a late transaction abort
+    // propagates as a rejection instead of a false success.
+    tx.oncomplete = () => resolve();
+    tx.onerror    = () => reject(tx.error);
+    tx.onabort    = () => reject(tx.error);
   });
 }
 
@@ -100,17 +103,25 @@ async function exportAll() {
    Creates the stores if this is the first time (index.html importing before
    library page has been visited).                                           */
 async function importAll(payload) {
-  const { items = [], files = {} } = payload || {};
+  // Destructuring defaults only apply to `undefined`, so items:null / files:null
+  // would throw in the loops below. Coerce explicitly.
+  const items = Array.isArray((payload || {}).items) ? payload.items : [];
+  const files = (payload && payload.files && typeof payload.files === 'object') ? payload.files : {};
 
   let db;
   try {
     db = await openDB();
   } catch (_) {
-    return 0;
+    return { items: 0, files: 0, failed: 0 };
   }
 
+  // Tally ACTUAL persisted successes (and failures) rather than input size.
+  let okItems = 0;
+  let okFiles = 0;
+  let failed  = 0;
+
   for (const item of items) {
-    try { await _put(db, 'items', item); } catch (_) {}
+    try { await _put(db, 'items', item); okItems++; } catch (_) { failed++; }
   }
 
   for (const [key, fileData] of Object.entries(files)) {
@@ -127,12 +138,12 @@ async function importAll(payload) {
       } else if (fileData instanceof Blob) {
         blob = fileData;
       }
-      if (blob) await _put(db, 'files', { key, blob });
-    } catch (_) {}
+      if (blob) { await _put(db, 'files', { key, blob }); okFiles++; }
+    } catch (_) { failed++; }
   }
 
   db.close();
-  return items.length;
+  return { items: okItems, files: okFiles, failed };
 }
 
 return { openDB, exportAll, importAll };

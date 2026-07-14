@@ -93,7 +93,7 @@ function createBoardAt(x, y) {
     const b = findBoard(node.dataset.id);
     if (!b) return;
     bringToFront(node);
-    drag = { node, b, startX: e.clientX, startY: e.clientY, origX: b.x, origY: b.y, h: node.offsetHeight, moved: false };
+    drag = { node, b, startX: e.clientX, startY: e.clientY, origX: b.x, origY: b.y, w: node.offsetWidth, h: node.offsetHeight, moved: false };
     e.preventDefault();
   });
 
@@ -102,7 +102,7 @@ function createBoardAt(x, y) {
     const dx = e.clientX - drag.startX, dy = e.clientY - drag.startY;
     if (!drag.moved && Math.hypot(dx, dy) < DRAG_THRESHOLD) return;
     if (!drag.moved) { drag.moved = true; drag.node.classList.add('board-dragging'); document.body.classList.add('dragging-any'); }
-    const nx = clamp(drag.origX + dx, 0, CANVAS_W - BOARD_W);
+    const nx = clamp(drag.origX + dx, 0, CANVAS_W - Math.max(BOARD_W, drag.w));
     const ny = clamp(drag.origY + dy, 0, CANVAS_H - Math.max(60, drag.h));
     drag.node.style.left = nx + 'px';
     drag.node.style.top = ny + 'px';
@@ -169,6 +169,12 @@ function createBoardAt(x, y) {
     if (!rz) return;
     if (rz.dir === 'e' || rz.dir === 'se') rz.b.w = parseInt(rz.node.style.width, 10);
     if (rz.dir === 's' || rz.dir === 'se') rz.b.h = parseInt(rz.node.style.height, 10);
+    // re-clamp position so a grown board stays on-canvas
+    const w = rz.b.w || rz.node.offsetWidth, h = rz.b.h || rz.node.offsetHeight;
+    rz.b.x = clamp(rz.b.x, 0, CANVAS_W - w);
+    rz.b.y = clamp(rz.b.y, 0, CANVAS_H - h);
+    rz.node.style.left = rz.b.x + 'px';
+    rz.node.style.top = rz.b.y + 'px';
     save();
     rz.node.classList.remove('resizing');
     document.body.classList.remove('dragging-any');
@@ -190,17 +196,28 @@ function tidyBoards() {
     return ra - rb || a.x - b2.x || a.y - b2.y;
   });
   // masonry into shortest column, honoring rendered heights
+  const stride = BOARD_W + TIDY_GAP;
   const heights = new Array(cols).fill(TIDY_ORIGIN - 8);
   for (const b of sorted) {
     const node = $('.board[data-id="' + b.id + '"]');
     // a collapsed board renders header-only; use its stored height so tidy still
     // reserves the space it'll take once expanded
     const h = (b.collapsed && b.h) ? b.h : (node ? node.offsetHeight : 200);
-    let col = 0;
-    for (let i = 1; i < cols; i++) if (heights[i] < heights[col]) col = i;
-    b.x = TIDY_ORIGIN + col * (BOARD_W + TIDY_GAP);
-    b.y = heights[col] + (heights[col] > TIDY_ORIGIN - 8 ? TIDY_GAP : 8);
-    heights[col] = b.y + h;
+    const w = b.w || BOARD_W;
+    // a resized board can be wider than the stride; reserve the columns it spans
+    // so it never overlaps a neighbouring column
+    const span = Math.min(cols, Math.max(1, Math.ceil((w + TIDY_GAP) / stride)));
+    // pick the shortest starting column that fits the board's span
+    let col = 0, best = Infinity;
+    for (let i = 0; i + span <= cols; i++) {
+      let top = TIDY_ORIGIN - 8;
+      for (let j = i; j < i + span; j++) if (heights[j] > top) top = heights[j];
+      if (top < best) { best = top; col = i; }
+    }
+    if (best === Infinity) { best = heights[col]; } // span wider than grid: use col 0
+    b.x = TIDY_ORIGIN + col * stride;
+    b.y = best + (best > TIDY_ORIGIN - 8 ? TIDY_GAP : 8);
+    for (let j = col; j < col + span && j < cols; j++) heights[j] = b.y + h;
   }
   save();
   // animate to new spots
@@ -264,6 +281,7 @@ function stopAutoscroll() {
   const canvas = $('#canvas');
   let press = null;   // pending press before threshold
   let drag = null;    // active drag
+  let dragGen = 0;    // bumped per drag so a stale animation callback can't rerender a live board
 
   canvas.addEventListener('pointerdown', (e) => {
     if (e.button !== 0) return;
@@ -330,6 +348,7 @@ function stopAutoscroll() {
       ghost, placeholder,
       offX: press.x - rect.left, offY: press.y - rect.top,
       w: rect.width,
+      gen: ++dragGen,
     };
     document.body.classList.add('dragging-any');
     lockTouchScroll();
@@ -374,18 +393,23 @@ function stopAutoscroll() {
   }
 
   function endCardDrag(e) {
-    const { placeholder, ghost, card, fromBoard } = drag;
+    const { placeholder, ghost, card, fromBoard, gen } = drag;
+    // if the placeholder's board was torn out mid-drag its list is null; never
+    // pass a null root to $$ (it would query the whole document and miscount)
     const targetList = placeholder.closest('.cards');
-    const toBoard = targetList ? findBoard(targetList.dataset.boardId) : fromBoard;
+    const toBoard = targetList ? findBoard(targetList.dataset.boardId) || fromBoard : fromBoard;
 
     // state: remove from source
     const fromIdx = fromBoard.cards.indexOf(card);
     if (fromIdx >= 0) fromBoard.cards.splice(fromIdx, 1);
     // state: insert at placeholder position
-    let insertIdx = 0;
-    for (const n of $$('.card, .card-placeholder', targetList)) {
-      if (n === placeholder) break;
-      if (n.classList.contains('card') && !n.classList.contains('done-card')) insertIdx++;
+    let insertIdx = toBoard.cards.length; // fall back to end when the list is gone
+    if (targetList) {
+      insertIdx = 0;
+      for (const n of $$('.card, .card-placeholder', targetList)) {
+        if (n === placeholder) break;
+        if (n.classList.contains('card') && !n.classList.contains('done-card')) insertIdx++;
+      }
     }
     toBoard.cards.splice(clamp(insertIdx, 0, toBoard.cards.length), 0, card);
     save();
@@ -395,6 +419,8 @@ function stopAutoscroll() {
     ghost.style.transition = 'transform 160ms cubic-bezier(.2,.7,.3,1)';
     ghost.style.transform = 'translate(' + pr.left + 'px,' + pr.top + 'px) rotate(0deg)';
     const finish = () => {
+      // a newer drag may have started; don't rerender a board hosting its live placeholder
+      if (gen !== dragGen) { ghost.remove(); return; }
       ghost.remove();
       rerenderBoard(fromBoard.id);
       if (toBoard.id !== fromBoard.id) rerenderBoard(toBoard.id);

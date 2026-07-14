@@ -80,6 +80,22 @@ EDUCATION_SLUGS = {
     "being-aware-of-opposing-views",
 }
 
+# ── Atomic JSON writer ────────────────────────────────────────────────────────
+
+def _write_json_atomic(path: Path, data, **json_kwargs) -> None:
+    """
+    Serialize `data` to `path` atomically: write to a sibling temp file on the
+    same filesystem, then os.replace() it into place. This prevents a truncated
+    manifest/article/fulltext file if the process is interrupted mid-write (a
+    partial manifest breaks the entire library page, which JSON.parses it).
+    Accepts the same json.dump kwargs (indent/ensure_ascii/separators/etc.).
+    """
+    path = Path(path)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(json.dumps(data, **json_kwargs), encoding="utf-8")
+    os.replace(tmp, path)
+
+
 # ── Image download settings ───────────────────────────────────────────────────
 IMAGE_WORKERS   = 12
 MAX_RETRIES     = 2
@@ -170,15 +186,11 @@ def download_image(orig_url: str, dest_path: Path) -> tuple[bool, int]:
             with urllib.request.urlopen(req, timeout=DOWNLOAD_TIMEOUT) as resp:
                 data = resp.read()
 
-            # Try to fix extension from Content-Type if we got it wrong
-            ct = resp.headers.get("Content-Type", "")
-            if ct:
-                # e.g. image/png → .png
-                ext_guess = mimetypes.guess_extension(ct.split(";")[0].strip())
-                if ext_guess and ext_guess not in (".jpg", ".jpeg", ".png", ".gif", ".webp"):
-                    # Keep as-is; mimetypes can return odd values
-                    pass
-
+            # Extension is taken from the URL path (see url_to_filename /
+            # cover_filename). We deliberately do not derive it from the
+            # Content-Type header: dest_path is already recorded in the manifest
+            # local_path before download, so renaming here would dangle the
+            # manifest reference.
             dest_path.parent.mkdir(parents=True, exist_ok=True)
             dest_path.write_bytes(data)
             return True, len(data)
@@ -219,12 +231,13 @@ def _extract_embed_url_from_attrs(data_attrs_str: str) -> str | None:
         attrs = json.loads(decoded)
     except Exception:
         return None
+    # Vimeo (test host first: Vimeo and YouTube both key on videoId, so the
+    # host check must gate before the YouTube fallback below)
+    if "videoId" in attrs and "vimeo" in data_attrs_str.lower():
+        return f"https://vimeo.com/{attrs['videoId']}"
     # YouTube
     if "videoId" in attrs:
         return f"https://www.youtube.com/watch?v={attrs['videoId']}"
-    # Vimeo
-    if "videoId" in attrs and "vimeo" in data_attrs_str.lower():
-        return f"https://vimeo.com/{attrs['videoId']}"
     # canonical_url (digest embeds)
     if "canonical_url" in attrs:
         return attrs["canonical_url"]
@@ -829,8 +842,7 @@ def process_posts() -> dict:
             "body_html": sanitized,
         }
         article_path = ARTICLES_DIR / f"{slug}.json"
-        with open(article_path, "w") as f:
-            json.dump(article_out, f, ensure_ascii=False, separators=(",", ":"))
+        _write_json_atomic(article_path, article_out, ensure_ascii=False, separators=(",", ":"))
 
         # 11. Fulltext index entry
         fulltext_index[slug] = plaintext
@@ -858,12 +870,10 @@ def process_posts() -> dict:
         "collections": COLLECTIONS,
         "items": manifest_items,
     }
-    with open(MANIFEST_PATH, "w") as f:
-        json.dump(manifest, f, ensure_ascii=False, indent=2)
+    _write_json_atomic(MANIFEST_PATH, manifest, ensure_ascii=False, indent=2)
 
     # 14. Write fulltext.json
-    with open(FULLTEXT_PATH, "w") as f:
-        json.dump(fulltext_index, f, ensure_ascii=False, separators=(",", ":"))
+    _write_json_atomic(FULLTEXT_PATH, fulltext_index, ensure_ascii=False, separators=(",", ":"))
 
     print(f"Manifest written: {len(manifest_items)} items", flush=True)
     print(f"Fulltext index written: {len(fulltext_index)} entries", flush=True)
@@ -929,11 +939,9 @@ def process_posts() -> dict:
             with open(article_path) as f:
                 article_out = json.load(f)
             article_out["meta"] = item
-            with open(article_path, "w") as f:
-                json.dump(article_out, f, ensure_ascii=False, separators=(",", ":"))
+            _write_json_atomic(article_path, article_out, ensure_ascii=False, separators=(",", ":"))
     if covers_healed or covers_nulled:
-        with open(MANIFEST_PATH, "w") as f:
-            json.dump(manifest, f, ensure_ascii=False, indent=2)
+        _write_json_atomic(MANIFEST_PATH, manifest, ensure_ascii=False, indent=2)
     print(f"covers repointed: {covers_healed}, nulled: {covers_nulled}", flush=True)
 
     return {

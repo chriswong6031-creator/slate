@@ -150,7 +150,7 @@ function purgeExpiredTrash() {
   if (!state.brain.trash) return;
   const cutoff = Date.now() - 30 * 24 * 60 * 60 * 1000;
   const before = state.brain.trash.length;
-  state.brain.trash = state.brain.trash.filter(e => e.deletedAt > cutoff);
+  state.brain.trash = state.brain.trash.filter(e => !(typeof e.deletedAt === 'number') || e.deletedAt > cutoff);
   // Persist the purge so deleted note bodies don't linger in localStorage
   if (state.brain.trash.length < before) saveNow();
 }
@@ -742,6 +742,9 @@ let _editorSaveTimer = null;
 let _editorDirty = false;
 
 function renderBrainEditor() {
+  // Disarm any pending autosave so a stale flush can't run against the rebuilt editor.
+  clearTimeout(_editorSaveTimer);
+  _editorSaveTimer = null;
   const root = $('#brainRoot');
   root.textContent = '';
 
@@ -967,6 +970,8 @@ function scheduleEditorSave(note) {
 }
 
 function flushEditorSave(note) {
+  clearTimeout(_editorSaveTimer);
+  _editorSaveTimer = null;
   const titleEl = $('#beTitle');
   const bodyEl = $('#beBody'); // only present in edit mode
   if (!titleEl) return;
@@ -986,6 +991,9 @@ function flushEditorSave(note) {
 
 /* flush on navigate away */
 function editorFlushIfDirty() {
+  // Disarm any pending autosave so it can't fire against a re-rendered editor.
+  clearTimeout(_editorSaveTimer);
+  _editorSaveTimer = null;
   if (!_editorDirty) return;
   const f = brainNoteId ? findNote(brainNoteId) : null;
   if (f) flushEditorSave(f.note);

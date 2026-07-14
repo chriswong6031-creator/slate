@@ -30,6 +30,22 @@ def sw_assets() -> list[str]:
     return sorted(set(rels))
 
 
+def assert_html_assets_precached() -> None:
+    """Every local js/css asset an HTML page loads must be in the SW's ASSETS list.
+    A forgotten entry would silently break offline (not precached) and never roll the
+    cache VERSION (the hash is derived only from ASSETS), so guard both directions."""
+    assets = set(sw_assets())
+    for page in ("index.html", "library.html"):
+        html = (ROOT / page).read_text(encoding="utf-8")
+        refs = re.findall(r'(?:src|href)="((?:\./)?(?:js|css)/[^"]+)"', html)
+        for ref in refs:
+            rel = ref[2:] if ref.startswith("./") else ref
+            assert rel in assets, (
+                f"{page} loads '{ref}' but it is missing from sw.js ASSETS "
+                f"(would not be precached offline)"
+            )
+
+
 def stamp_service_worker() -> str:
     digest = hashlib.md5()
     for rel in sw_assets():
@@ -72,6 +88,7 @@ def build_single_file() -> None:
 
 
 if __name__ == "__main__":
+    assert_html_assets_precached()
     stamp = stamp_service_worker()
     print(f"sw.js cache version: slate-{stamp}")
     build_single_file()

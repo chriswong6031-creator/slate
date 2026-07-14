@@ -37,8 +37,8 @@ let allItems = [];       // citrini items from manifest
 let _userNormItems = []; // user items (normalized), set by LibUser
 let manifest = null;
 let fulltextIndex = null;  // {slug: plaintext} — lazy-loaded
-let fulltextLoading = false;
 let ftLoaded = false;
+let _ftPromise = null;     // shared in-flight load; cleared on failure so callers can retry
 
 // Injected by LibUser after IDB load
 function _setUserItems(items) {
@@ -77,23 +77,15 @@ async function loadManifest() {
 /* ===== FULL-TEXT LOAD (lazy) ===== */
 async function ensureFulltext() {
   if (ftLoaded) return fulltextIndex;
-  if (fulltextLoading) {
-    // Wait for the in-flight load
-    await new Promise(res => {
-      const check = setInterval(() => { if (ftLoaded) { clearInterval(check); res(); } }, 50);
-    });
-    return fulltextIndex;
-  }
-  fulltextLoading = true;
-  try {
+  if (_ftPromise) return _ftPromise;
+  _ftPromise = (async () => {
     const resp = await fetch('library/search/fulltext.json');
     if (!resp.ok) throw new Error('HTTP ' + resp.status);
     fulltextIndex = await resp.json();
     ftLoaded = true;
-  } finally {
-    fulltextLoading = false;
-  }
-  return fulltextIndex;
+    return fulltextIndex;
+  })().catch(e => { _ftPromise = null; throw e; });
+  return _ftPromise;
 }
 
 /* ===== ARTICLE LOAD ===== */

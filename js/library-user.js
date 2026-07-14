@@ -177,10 +177,10 @@ function showUndoToast(msg) {
   undoBtn.className = 'lib-toast-undo';
   undoBtn.textContent = 'Undo';
   undoBtn.addEventListener('click', () => {
+    // The undo fn is async (idbPut + loadUserItems) and re-merges/re-renders
+    // once the restore completes — don't re-render here against the still-
+    // post-delete list, or the card won't reappear until a tick later.
     executeUndo();
-    // Re-merge & re-render after undo
-    mergeIntoAllItems();
-    if (window.LibApp) window.LibApp.renderAll();
     dismissLibToast();
     showLibToast('Restored.', 2000);
   });
@@ -531,13 +531,23 @@ async function exportAll() {
 
 /* ===== C1: Full library import — delegates to SlateBackupDB ===== */
 async function importAll(libraryPayload) {
-  let count = 0;
+  // Return the same { items, files, failed } shape as SlateBackupDB.importAll so
+  // callers (app.js import toast) get accurate counts regardless of which path ran.
+  let result = { items: 0, files: 0, failed: 0 };
   if (window.SlateBackupDB && typeof window.SlateBackupDB.importAll === 'function') {
-    count = await window.SlateBackupDB.importAll(libraryPayload);
+    const r = await window.SlateBackupDB.importAll(libraryPayload);
+    result = (r && typeof r === 'object')
+      ? { items: r.items || 0, files: r.files || 0, failed: r.failed || 0 }
+      : { items: r || 0, files: 0, failed: 0 }; // tolerate a legacy numeric return
   } else {
     // Fallback direct path
-    const { items = [], files = {} } = libraryPayload || {};
-    for (const item of items) { try { await idbPut('items', item); } catch (_) {} }
+    const p = libraryPayload || {};
+    // Coerce null sub-fields explicitly so a null items/files doesn't throw.
+    const items = Array.isArray(p.items) ? p.items : [];
+    const files = (p.files && typeof p.files === 'object') ? p.files : {};
+    for (const item of items) {
+      try { await idbPut('items', item); result.items++; } catch (_) { result.failed++; }
+    }
     for (const [key, fileData] of Object.entries(files)) {
       if (!fileData) continue;
       try {
@@ -551,16 +561,15 @@ async function importAll(libraryPayload) {
         } else if (fileData instanceof Blob) {
           blob = fileData;
         }
-        if (blob) await idbPut('files', { key, blob });
-      } catch (_) {}
+        if (blob) { await idbPut('files', { key, blob }); result.files++; }
+      } catch (_) { result.failed++; }
     }
-    count = (libraryPayload && libraryPayload.items ? libraryPayload.items.length : 0);
   }
 
   // Reload in-memory list
   await loadUserItems();
   mergeIntoAllItems();
-  return count;
+  return result;
 }
 
 /* ===== IDB availability check ===== */

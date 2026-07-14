@@ -65,11 +65,14 @@ function rerenderBoard(boardId) {
     const compTitle = $('.composer-title', old);
     if (compTitle) {
       const compDesc = $('.composer-desc', old);
+      const activeEl = document.activeElement;
       draft = {
         t: compTitle.value,
         d: compDesc ? compDesc.value : '',
         dHidden: compDesc ? compDesc.hidden : true,
-        focused: old.contains(document.activeElement),
+        // remember WHICH field held focus so the re-render restores it there
+        // (not always the title) — see openComposer in ui.js
+        focusField: activeEl === compDesc ? 'desc' : (activeEl === compTitle ? 'title' : null),
       };
     }
   }

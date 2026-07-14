@@ -537,7 +537,9 @@ def run(base_url: str, fixture: bool = False) -> int:
         import_count = p_c1.evaluate(
             "async (payload) => {"
             "  if (!window.SlateBackupDB) return -1;"
-            "  return window.SlateBackupDB.importAll(payload);"
+            # importAll now resolves to { items, files, failed }; report the items count
+            "  const r = await window.SlateBackupDB.importAll(payload);"
+            "  return (r && typeof r === 'object') ? (r.items || 0) : r;"
             "}", backup_payload)
         if not check('W1-C1: SlateBackupDB.importAll returns correct count',
                      import_count >= 2, f'count={import_count}'): failures += 1
@@ -730,7 +732,7 @@ def run(base_url: str, fixture: bool = False) -> int:
         # Sidebar should NOT be visible (off-screen)
         sidebar_offscreen = mp.evaluate(
             "() => { const el = document.getElementById('lib-sidebar');"
-            "  if (!el) return False;"
+            "  if (!el) return false;"
             "  return !el.classList.contains('open'); }")
         if not check('W2b-UX02: mobile 390px — sidebar starts closed', sidebar_offscreen): failures += 1
 

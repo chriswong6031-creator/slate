@@ -447,6 +447,11 @@ async function init() {
       closeSidebar();
     }
   });
+  // BUG-17: auto-close when resized to desktop so body scroll-lock and the
+  // backdrop don't get stranded (the mobile sheet only exists <=700px).
+  window.matchMedia('(min-width:701px)').addEventListener('change', e => {
+    if (e.matches) closeSidebar();
+  });
 
   // C7: Load manifest and user items independently so a manifest failure never
   // prevents the user's own local IDB content from rendering.
@@ -524,19 +529,15 @@ return { applyFilter, renderAll };
        show a non-blocking "Slate updated — Reload" toast.  No auto-reload:
        reloading mid-edit would lose unsaved compose state. */
 if ('serviceWorker' in navigator && location.protocol !== 'file:') {
-  // C6: capture whether a SW was already controlling the page at load time.
-  // skipWaiting()+clients.claim() fires controllerchange on the FIRST install too;
-  // we only want the toast when an EXISTING SW was REPLACED (i.e. a real update).
-  const hadControllerAtLoad = !!navigator.serviceWorker.controller;
-  window.addEventListener('load', () => {
-    navigator.serviceWorker.register('sw.js').catch((e) =>
-      console.warn('Slate Library: SW registration failed', e));
-  });
-  // C6: update toast on controllerchange (new SW took over via skipWaiting+claim).
-  // No auto-reload — reloading mid-compose would destroy unsaved write-up text.
-  // showLibToast() takes only (msg, ms) so we build the Reload button inline.
-  navigator.serviceWorker.addEventListener('controllerchange', () => {
-    if (!hadControllerAtLoad) return; // first-ever install — not an update
+  // C6/BUG-26: show the "updated" toast only on a GENUINE update — a new sw
+  // finishing install while an old one still controls the page — driven by
+  // updatefound→statechange (not controllerchange), so a long-lived tab that
+  // began uncontrolled still catches its first real update (a frozen
+  // hadControllerAtLoad snapshot would wrongly suppress it). A first-ever install
+  // has no controller, so it stays silent. No auto-reload — reloading mid-compose
+  // would destroy unsaved write-up text. showLibToast() takes only (msg, ms) so we
+  // build the Reload button inline.
+  const _swUpdateToast = () => {
     if (window._swUpdateShown) return;
     window._swUpdateShown = true;
     const t = document.getElementById('lib-toast');
@@ -553,6 +554,17 @@ if ('serviceWorker' in navigator && location.protocol !== 'file:') {
     t.appendChild(btn);
     t.classList.add('show');
     // No auto-dismiss — user must choose to reload
+  };
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('sw.js').then((reg) => {
+      reg.addEventListener('updatefound', () => {
+        const nw = reg.installing;
+        if (!nw) return;
+        nw.addEventListener('statechange', () => {
+          if (nw.state === 'installed' && navigator.serviceWorker.controller) _swUpdateToast();
+        });
+      });
+    }).catch((e) => console.warn('Slate Library: SW registration failed', e));
   });
 }
 </script>

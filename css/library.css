@@ -1026,7 +1026,6 @@
 /* ===== LIBRARY V2: USER CARDS ===== */
 
 /* User item card: cobalt-tinted spine */
---cc-user: #3B82F6;
 .lib-card-user .lib-card-cover-user { background: rgba(59,130,246,0.10); }
 .lib-card-cover-user .lib-spine-bar { background: #3B82F6; }
 .lib-card-cover-user .lib-spine-text { color: #2563EB; }
@@ -1273,11 +1272,13 @@
   backdrop-filter: blur(2px);
   -webkit-backdrop-filter: blur(2px);
 }
-#lib-sidebar-backdrop.show { display: block; }
 
 @media (max-width: 700px) {
   /* Show hamburger */
   #lib-sidebar-toggle { display: flex; }
+
+  /* Backdrop only shows at mobile widths */
+  #lib-sidebar-backdrop.show { display: block; }
 
   /* Sidebar becomes a slide-in sheet */
   #lib-sidebar {
@@ -1540,15 +1541,21 @@
 }
 
 /* ===== WAVE 2b: TOAST VISUALS (UX-04) ===== */
-/* Lib-toast: match main app position (bottom-right) + pill style */
+/* Lib-toast: match main app position (bottom-right) + pill style.
+   Desktop positioning is scoped to min-width so the mobile full-width
+   override (@media max-width:700px) is not clobbered by source order. */
 #lib-toast {
   bottom: 24px;
-  left: auto;
-  right: 24px;
   transform: translateY(12px);
   border-radius: 10px;
-  min-width: 200px;
-  max-width: 380px;
+}
+@media (min-width: 701px) {
+  #lib-toast {
+    left: auto;
+    right: 24px;
+    min-width: 200px;
+    max-width: 380px;
+  }
 }
 #lib-toast.show {
   transform: translateY(0);

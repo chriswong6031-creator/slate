@@ -14,6 +14,12 @@ let _openGeneration = 0; // incremented each open(); stale fetch guards compare 
 let _pdfBlobUrl = null;  // revoke on close
 
 async function open(idx) {
+  // Tear down any progress tracking from the previously open article FIRST,
+  // before we touch scrollTop or branch into the PDF/writeup renderers. This
+  // clears a pending throttle timer and unbinds the stale scroll listener so
+  // they can't write this article's (reset) scroll position onto the old slug.
+  _teardownProgress();
+
   D.readerIdx = idx;
   const item = D.filteredItems[idx];
   if (!item) return;
@@ -300,8 +306,13 @@ async function _renderUserPdf(item, scroll, myGen) {
 
   try {
     const blobUrl = await window.LibUser.getFileBlobUrl(item.fileKey);
-    // Bail if another open() superseded us while awaiting the IDB fetch
-    if (myGen !== undefined && _openGeneration !== myGen) return;
+    // Bail if another open() superseded us while awaiting the IDB fetch.
+    // Revoke the just-created object URL first — we never stored it in
+    // _pdfBlobUrl, so nothing else can revoke it and it would leak.
+    if (myGen !== undefined && _openGeneration !== myGen) {
+      if (blobUrl) URL.revokeObjectURL(blobUrl);
+      return;
+    }
     if (!blobUrl) {
       bodyEl.innerHTML = '<p style="color:var(--danger)">PDF file not found in storage.</p>';
       return;
@@ -461,8 +472,8 @@ function close() {
   // Teardown clip pill
   _teardownClipPill();
 
-  // Flush any pending progress write
-  clearTimeout(_progressThrottle);
+  // Tear down progress tracking (clears pending throttle write + scroll listener)
+  _teardownProgress();
 
   // Reset hash to grid
   D.pushHash('');
@@ -533,15 +544,33 @@ function _initProgress(scroll, bodyEl, slug) {
 
     // Throttle write to ≤1/s
     if (_progressSlug) {
+      // Capture the slug into the closure so a late-firing timer can never
+      // target a different article than the one being scrolled.
+      const s = _progressSlug;
       clearTimeout(_progressThrottle);
       _progressThrottle = setTimeout(() => {
-        D.saveProgress(_progressSlug, Math.round(pct), scroll.scrollTop);
+        D.saveProgress(s, Math.round(pct), scroll.scrollTop);
       }, 1000);
     }
   }
 
   _progressScrollListener = update;
   scroll.addEventListener('scroll', update, { passive: true });
+}
+
+/* Tear down progress tracking so a stale throttle/scroll handler can't write
+   onto a different (newly opened) article. Safe to call repeatedly. */
+function _teardownProgress() {
+  clearTimeout(_progressThrottle);
+  _progressThrottle = null;
+  if (_progressScrollListener) {
+    const scroll = document.getElementById('lib-reader-scroll');
+    if (scroll) {
+      try { scroll.removeEventListener('scroll', _progressScrollListener, { passive: true }); } catch (_) {}
+    }
+    _progressScrollListener = null;
+  }
+  _progressSlug = null;
 }
 
 /* Restore scroll position for an already-open article */
